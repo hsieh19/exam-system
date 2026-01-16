@@ -1,7 +1,7 @@
-const CATEGORIES = ['电气专业', '暖通专业', '弱电专业', '消防专业', '公共题目'];
 let editingQuestion = null;
 let editingUserId = null; // 新增：用于标记当前正在编辑的用户
-let cachedData = { groups: [], users: [], questions: [], papers: [] };
+let selectedGroupId = null; // 当前选中的分组ID
+let cachedData = { groups: [], users: [], questions: [], papers: [], categories: [] };
 
 document.addEventListener('DOMContentLoaded', async function () {
     const user = Auth.checkAdmin();
@@ -19,6 +19,7 @@ async function refreshCache() {
     cachedData.users = await Storage.getUsers();
     cachedData.questions = await Storage.getQuestions();
     cachedData.papers = await Storage.getPapers();
+    cachedData.categories = await Storage.getCategories();
 }
 
 function initNavigation() {
@@ -68,11 +69,43 @@ function closeModal() {
 // ========== 分组管理 ==========
 function loadGroups() {
     const groups = cachedData.groups;
-    const html = groups.length ? `<table class="data-table"><thead><tr><th>分组名称</th><th style="text-align:center;width:100px;">操作</th></tr></thead>
-    <tbody>${groups.map(g => `<tr><td>${escapeHtml(g.name)}</td><td style="text-align:center;">
-      <button class="btn btn-sm btn-danger" onclick="deleteGroup('${g.id}')">删除</button>
-    </td></tr>`).join('')}</tbody></table>` : '<p class="text-muted">暂无分组</p>';
-    document.getElementById('groups-list').innerHTML = html;
+
+    // 渲染为列表形式以便选择
+    const listHtml = `
+        <div class="group-list" style="display:flex; flex-direction:column; gap:0;">
+            ${groups.length ? '' : '<div style="padding:15px;text-align:center;color:var(--text-muted);">暂无分组</div>'}
+            ${groups.map(g => {
+        const isActive = selectedGroupId === g.id;
+        const activeStyle = isActive ? 'background-color: rgba(37, 99, 235, 0.1); border-left: 3px solid var(--primary);' : 'border-left: 3px solid transparent;';
+        return `
+                <div class="group-item" onclick="selectGroup('${g.id}')" 
+                     style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle}">
+                    <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}">${escapeHtml(g.name)}</span>
+                    <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>
+                </div>
+                `;
+    }).join('')}
+        </div>
+    `;
+
+    document.getElementById('groups-list').innerHTML = listHtml;
+}
+
+function selectGroup(id) {
+    // 如果再次点击已选中的，取消选中？还是保持？
+    // 用户需求是级联，通常保持。但为了能看“所有”，可以再次点击取消，或者有个“全部”按钮。
+    // 这里实现：点击切换。如果想看全部，这里暂时没做“全部”选项，但可以视为 selectedGroupId = null 为全部。
+    // 为了严格级联（必须先有分组），可能不需要“全部”视图，或者“全部”视图下禁止添加用户。
+    // 让我们允许取消选中（Toggle）。
+
+    if (selectedGroupId === id) {
+        selectedGroupId = null; // 取消选中
+    } else {
+        selectedGroupId = id;
+    }
+
+    loadGroups(); // 刷新高亮
+    loadUsers();  // 刷新用户
 }
 
 function showAddGroup() {
@@ -91,20 +124,7 @@ async function saveGroup() {
     }
 }
 
-async function deleteGroup(id) {
-    // 检查该分组下是否有用户
-    const hasUsers = cachedData.users.some(u => u.groupId === id);
-    if (hasUsers) {
-        alert('无法删除：该分组下仍有用户。请先将用户移动到其他分组或删除用户。');
-        return;
-    }
 
-    if (confirm('确定删除此分组？')) {
-        await Storage.deleteGroup(id);
-        await refreshCache();
-        loadGroups();
-    }
-}
 
 // ========== 用户管理 ==========
 function loadUsers() {
@@ -121,11 +141,14 @@ function renderUsers() {
     const groups = cachedData.groups;
     const getGroupName = (gid) => groups.find(g => g.id === gid)?.name || '-';
 
+    // 优先处理搜索（全局搜索），若无搜索词则按分组过滤
     if (query) {
         users = users.filter(u => {
             const groupName = getGroupName(u.groupId).toLowerCase();
             return u.username.toLowerCase().includes(query) || groupName.includes(query);
         });
+    } else if (selectedGroupId) {
+        users = users.filter(u => u.groupId === selectedGroupId);
     }
 
     const html = users.length ? `<table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th style="text-align:center;width:280px;">操作</th></tr></thead>
@@ -161,7 +184,7 @@ async function toggleAdmin(id) {
 
     const mySelf = Storage.getCurrentUser();
     if (mySelf && mySelf.id === user.id && user.role === 'admin') {
-        alert('无法取消自己的管理员权限');
+        showAlert('无法取消自己的管理员权限');
         return;
     }
 
@@ -181,14 +204,30 @@ async function toggleAdmin(id) {
 }
 
 function showAddUser() {
+    // 强制先选择分组
+    if (!selectedGroupId) {
+        showAlert('请先从左侧选择一个分组');
+        return;
+    }
+
     editingUserId = null; // 重置为新增模式
     const groups = cachedData.groups;
+
+    // 生成选项，当前选中的分组被选中且disabled（为了视觉和逻辑一致性），或者只是选中
+    // 如果用户允许改动，那么加完了列表里就不见了，会很奇怪。所以最好绑定。
+    const groupOptions = groups.map(g =>
+        `<option value="${g.id}" ${g.id === selectedGroupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+    ).join('');
+
     openModal('添加用户',
         `<div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name"></div>
          <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" value="123456"></div>
-         <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group">
-           <option value="">未分组</option>
-           ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}</select></div>`,
+         <div class="form-group"><label class="form-label">分组</label>
+            <select class="form-select" id="user-group" disabled style="background-color: var(--bg-light); opacity: 0.7;">
+                ${groupOptions}
+            </select>
+         </div>
+         <p style="font-size:12px; color:var(--text-muted); margin-top:-10px;">将在当前选中的分组下创建用户</p>`,
         '<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveUser()">保存</button>');
 }
 
@@ -212,7 +251,7 @@ async function saveUser() {
     const password = document.getElementById('user-pwd').value;
     const groupId = document.getElementById('user-group').value;
 
-    if (!username) { alert('请输入用户名'); return; }
+    if (!username) { showAlert('请输入用户名'); return; }
 
     if (editingUserId) {
         // 编辑模式
@@ -232,12 +271,226 @@ async function saveUser() {
     loadUsers();
 }
 
-async function deleteUser(id) {
-    if (confirm('确定删除此用户？')) {
-        await Storage.deleteUser(id);
-        await refreshCache();
-        loadUsers();
+
+
+// ========== 专业分类管理 ==========
+let selectedMajorId = null;
+
+function showCategorySettings() {
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+
+    // 如果没有选中的专业，默认选中第一个
+    if (!selectedMajorId && majors.length > 0) {
+        selectedMajorId = majors[0].id;
     }
+
+    // 隐藏其他可能打开的编辑器
+    if (document.getElementById('question-editor')) {
+        document.getElementById('question-editor').innerHTML = '';
+        document.getElementById('question-editor').classList.add('hidden');
+    }
+
+    const html = `
+        <div class="card" style="margin-bottom:24px;overflow:hidden;">
+            <div class="card-header">
+                <span class="card-title">专业与设备类型设置</span>
+            </div>
+            <div class="settings-panel">
+                <!-- 左侧：专业列表 -->
+                <div class="settings-sidebar">
+                    <div class="settings-sidebar-header">
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" class="form-input" id="new-major-name" placeholder="新专业名称" style="flex:1;">
+                            <button class="btn btn-primary btn-sm" onclick="addMajor()">添加</button>
+                        </div>
+                    </div>
+                    <div class="major-list" id="majors-list">
+                        ${majors.length ? majors.map(m => `
+                            <div class="major-item ${m.id === selectedMajorId ? 'active' : ''}" onclick="selectMajor('${m.id}')">
+                                <span>${escapeHtml(m.name)}</span>
+                                <div class="major-actions">
+                                    <button class="btn-icon-xs edit" onclick="event.stopPropagation();editMajor('${m.id}','${escapeHtml(m.name)}')" title="重命名">✎</button>
+                                    <button class="btn-icon-xs delete" onclick="event.stopPropagation();deleteMajor('${m.id}')" title="删除">🗑️</button>
+                                </div>
+                            </div>
+                        `).join('') : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">暂无专业<br>请先添加</div>'}
+                    </div>
+                </div>
+                
+                <!-- 右侧：设备类型列表 -->
+                <div class="settings-content">
+                    <h3 style="font-size:15px;margin-bottom:16px;font-weight:600;display:flex;align-items:center;gap:8px;">
+                        <span style="color:var(--text-secondary);">当前专业：</span>
+                        <span style="color:var(--primary);">${selectedMajorId ? (majors.find(m => m.id === selectedMajorId)?.name || '') : '-'}</span>
+                    </h3>
+                    
+                    <div id="devices-panel">
+                        ${renderDevicesPanelContent()}
+                    </div>
+                </div>
+            </div>
+            <div style="padding:16px 24px;background:var(--bg-card);border-top:1px solid var(--border);">
+                <button class="btn btn-secondary" onclick="closeCategorySettings()">完成设置</button>
+            </div>
+        </div>
+    `;
+
+    const container = document.getElementById('question-editor');
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+    container.scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeCategorySettings() {
+    const container = document.getElementById('question-editor');
+    container.classList.add('hidden');
+    container.innerHTML = '';
+}
+
+function renderDevicesPanelContent() {
+    if (!selectedMajorId) {
+        return '<div style="padding:40px;text-align:center;color:var(--text-muted);background:var(--bg-body);border-radius:var(--radius-md);">请先在左侧选择或添加一个专业</div>';
+    }
+
+    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === selectedMajorId);
+
+    return `
+        <div style="display:flex;gap:12px;margin-bottom:20px;max-width:400px;">
+            <input type="text" class="form-input" id="new-device-name" placeholder="输入设备类型名称" style="flex:1;">
+            <button class="btn btn-primary" onclick="addDeviceType()">添加设备</button>
+        </div>
+        
+        <div style="display:flex;flex-wrap:wrap;gap:12px;">
+            ${devices.length ? devices.map(d => `
+                <div class="device-tag">
+                    <span class="device-name">${escapeHtml(d.name)}</span>
+                    <div class="device-actions">
+                        <button class="btn-circle-xs edit" onclick="editDevice('${d.id}','${escapeHtml(d.name)}')" title="重命名">✎</button>
+                        <button class="btn-circle-xs delete" onclick="deleteDevice('${d.id}')" title="删除">✕</button>
+                    </div>
+                </div>
+            `).join('') : '<div style="width:100%;padding:30px;text-align:center;background:var(--bg-body);border-radius:var(--radius-md);border:1px dashed var(--border);color:var(--text-muted);">该专业下暂无设备类型，请添加</div>'}
+        </div>
+    `;
+}
+
+function renderDevicesPanel() {
+    return renderDevicesPanelContent();
+}
+
+function selectMajor(majorId) {
+    selectedMajorId = majorId;
+    showCategorySettings(); // 刷新整个弹窗以更新选中状态
+}
+
+// 重命名相关的全局变量
+let pendingRenameCallback = null;
+
+function editMajor(id, currentName) {
+    showRenameModal('修改专业名称', currentName, async (newName) => {
+        if (newName !== currentName) {
+            await updateCategoryName(id, newName);
+        }
+    });
+}
+
+function editDevice(id, currentName) {
+    showRenameModal('修改设备类型名称', currentName, async (newName) => {
+        if (newName !== currentName) {
+            await updateCategoryName(id, newName, true);
+        }
+    });
+}
+
+function showRenameModal(title, currentName, onSave) {
+    pendingRenameCallback = onSave;
+    const isMajor = title.includes('专业');
+    const labelPrefix = isMajor ? '专业' : '设备类型';
+
+    const bodyHtml = `
+        <div class="form-group">
+            <label class="form-label">原名称</label>
+            <input type="text" class="form-input" value="${escapeHtml(currentName)}" disabled style="background:var(--bg-input);cursor:not-allowed;">
+        </div>
+        <div class="form-group">
+            <label class="form-label">修改后名称</label>
+            <input type="text" class="form-input" id="rename-input" value="${escapeHtml(currentName)}" placeholder="请输入新名称" onkeydown="if(event.key==='Enter') confirmRename()">
+        </div>
+    `;
+    const footerHtml = `
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="confirmRename()">保存</button>
+    `;
+    openModal(title, bodyHtml, footerHtml);
+    // 自动聚焦输入框
+    setTimeout(() => {
+        const input = document.getElementById('rename-input');
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }, 100);
+}
+
+async function confirmRename() {
+    const newName = document.getElementById('rename-input').value.trim();
+    if (!newName) {
+        showAlert('名称不能为空');
+        return;
+    }
+
+    // 显示加载状态
+    const btn = document.querySelector('#modal-footer .btn-primary');
+    if (btn) {
+        btn.textContent = '保存中...';
+        btn.disabled = true;
+    }
+
+    try {
+        if (pendingRenameCallback) {
+            await pendingRenameCallback(newName);
+        }
+        closeModal();
+    } catch (e) {
+        console.error(e);
+        showAlert('保存失败，请重试');
+        if (btn) {
+            btn.textContent = '保存';
+            btn.disabled = false;
+        }
+    }
+}
+
+async function updateCategoryName(id, newName, isDevice = false) {
+    await Storage.updateCategory({ id, name: newName });
+    await refreshCache();
+    if (isDevice) {
+        document.getElementById('devices-panel').innerHTML = renderDevicesPanel();
+    } else {
+        showCategorySettings();
+    }
+}
+
+async function addMajor() {
+    const name = document.getElementById('new-major-name').value.trim();
+    if (!name) { showAlert('请输入专业名称'); return; }
+
+    const result = await Storage.addCategory({ name, type: 'major' });
+    await refreshCache();
+    selectedMajorId = result.id || cachedData.categories.find(c => c.name === name && c.type === 'major')?.id;
+    showCategorySettings();
+}
+
+async function addDeviceType() {
+    if (!selectedMajorId) { showAlert('请先选择一个专业'); return; }
+
+    const name = document.getElementById('new-device-name').value.trim();
+    if (!name) { showAlert('请输入设备类型名称'); return; }
+
+    await Storage.addCategory({ name, type: 'device', parentId: selectedMajorId });
+    await refreshCache();
+    // 只刷新右侧面板
+    document.getElementById('devices-panel').innerHTML = renderDevicesPanel();
 }
 
 // ========== 题库管理 ==========
@@ -249,12 +502,15 @@ function loadQuestions() {
     questions = questions.filter(q => currentQuestionFilters.includes(q.type));
 
     const typeMap = { single: '单选题', multiple: '多选题', judge: '判断题' };
+    const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
+    const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
 
     const html = questions.length ? `<div class="table-container"><table class="data-table">
-    <thead><tr><th>专业</th><th>题目</th><th>类型</th><th>操作</th></tr></thead>
+    <thead><tr><th>专业</th><th>设备类型</th><th>题目</th><th>类型</th><th>操作</th></tr></thead>
     <tbody>${questions.map(q => `<tr>
-      <td>${escapeHtml(q.category || '-')}</td>
-      <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
+      <td>${escapeHtml(getMajorName(q.category))}</td>
+      <td>${escapeHtml(getDeviceName(q.deviceType) || '-')}</td>
+      <td style="max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
       <td><span class="badge badge-primary">${typeMap[q.type]}</span></td>
       <td>
         <button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>
@@ -270,7 +526,7 @@ function toggleQuestionFilter(btn) {
     if (btn.classList.contains('active')) {
         // 如果至少剩下一个，才允许取消
         if (currentQuestionFilters.length <= 1) {
-            alert('至少需保留一个题型。');
+            showAlert('至少需保留一个题型。');
             return;
         }
         btn.classList.remove('active', 'btn-primary');
@@ -297,7 +553,14 @@ function editQuestion(id) {
 
 function showQuestionEditor(type) {
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
-    const q = editingQuestion || { category: CATEGORIES[0], content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A' };
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+    const devices = cachedData.categories.filter(c => c.type === 'device');
+
+    const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A' };
+
+    // 找到当前专业对应的设备类型
+    const currentMajorId = q.category || '';
+    const currentDevices = devices.filter(d => d.parentId === currentMajorId);
 
     let optionsHtml = '';
     if (type === 'judge') {
@@ -315,7 +578,7 @@ function showQuestionEditor(type) {
         const opts = q.options || ['', '', '', ''];
         optionsHtml = `<div class="form-group"><label class="form-label">选项</label><div id="options-container">
       ${opts.map((o, i) => `<div class="option-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:24px;font-weight:bold;">${'ABCDEFGH'[i]}.</span>
-        <input type="text" class="form-input" value="${o}" placeholder="选项内容" style="margin:0;">
+        <input type="text" class="form-input" value="${escapeHtml(o)}" placeholder="选项内容" style="margin:0;">
         <button class="btn btn-sm btn-danger" onclick="removeOption(this)" ${opts.length <= 2 ? 'disabled' : ''}>删除</button>
       </div>`).join('')}</div>
       <div class="add-option-btn" onclick="addOption()" style="color:var(--primary);cursor:pointer;font-size:14px;font-weight:500;margin-top:8px;">+ 添加选项</div></div>
@@ -324,14 +587,35 @@ function showQuestionEditor(type) {
     }
 
     const editorInnerHtml = `
-      <div class="form-group"><label class="form-label">专业</label>
-        <select class="form-select" id="q-category">${CATEGORIES.map(c => `<option value="${c}" ${c === q.category ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+      <div style="display:flex;gap:16px;margin-bottom:16px;">
+        <div class="form-group" style="flex:1;margin-bottom:0;">
+          <label class="form-label">专业</label>
+          <select class="form-select" id="q-category" onchange="onMajorChange()">
+            <option value="">请选择专业</option>
+            ${majors.map(m => `<option value="${m.id}" ${m.id === q.category ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;margin-bottom:0;">
+          <label class="form-label">设备类型</label>
+          <select class="form-select" id="q-deviceType">
+            <option value="">请先选择专业</option>
+            ${currentDevices.map(d => `<option value="${d.id}" ${d.id === q.deviceType ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div class="form-group"><label class="form-label">题目</label>
         <textarea class="form-input" id="q-content" rows="3" placeholder="请输入题目内容">${q.content}</textarea></div>
       ${optionsHtml}`;
 
     if (editingQuestion) {
         // 编辑模式使用弹窗
+        // 先清除页面上可能存在的内嵌编辑器，防止 ID 冲突
+        const editorContainer = document.getElementById('question-editor');
+        if (editorContainer) {
+            editorContainer.innerHTML = '';
+            editorContainer.classList.add('hidden');
+        }
+
         const footerHtml = `
           <button class="btn btn-success" onclick="saveQuestion('${type}')">保存</button>
           <button class="btn btn-secondary" onclick="closeModal()">取消</button>`;
@@ -354,6 +638,17 @@ function showQuestionEditor(type) {
         editorContainer.scrollIntoView({ behavior: 'smooth' });
     }
 }
+
+function onMajorChange() {
+    const majorId = document.getElementById('q-category').value;
+    const deviceSelect = document.getElementById('q-deviceType');
+    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === majorId);
+
+    deviceSelect.innerHTML = majorId
+        ? `<option value="">请选择设备类型</option>${devices.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('')}`
+        : '<option value="">请先选择专业</option>';
+}
+
 
 function addOption() {
     const container = document.getElementById('options-container');
@@ -381,31 +676,99 @@ function updateOptionLabels() {
 }
 
 async function saveQuestion(type) {
-    const category = document.getElementById('q-category').value;
-    const content = document.getElementById('q-content').value.trim();
-    let options = [], answer;
+    try {
+        const categoryEl = document.getElementById('q-category');
+        const deviceTypeEl = document.getElementById('q-deviceType');
+        const contentEl = document.getElementById('q-content');
+        const answerEl = document.getElementById('q-answer');
 
-    if (type === 'judge') {
-        options = ['正确', '错误'];
-        answer = document.getElementById('q-answer').value;
-    } else {
-        document.querySelectorAll('#options-container .option-row input').forEach(input => options.push(input.value.trim()));
-        const answerVal = document.getElementById('q-answer').value.toUpperCase().trim();
-        answer = type === 'multiple' ? answerVal.split(',').map(a => a.trim()) : answerVal;
+        if (!categoryEl || !contentEl) {
+            console.error('Missing form elements');
+            showAlert('页面表单加载异常，请刷新重试');
+            return;
+        }
+
+        const category = categoryEl.value;
+        const deviceType = deviceTypeEl ? deviceTypeEl.value : '';
+        const content = contentEl.value.trim();
+        let options = [], answer;
+
+        if (type === 'judge') {
+            options = ['正确', '错误'];
+            answer = answerEl.value;
+        } else {
+            document.querySelectorAll('#options-container .option-row input').forEach(input => options.push(input.value.trim()));
+
+            // 验证选项内容不为空
+            if (options.some(o => !o)) {
+                showAlert('选项内容不能为空');
+                return;
+            }
+
+            const answerVal = answerEl.value.toUpperCase().trim();
+            const validLabels = 'ABCDEFGH'.substring(0, options.length).split('');
+
+            if (type === 'multiple') {
+                // 支持中英文逗号
+                const answers = answerVal.split(/[,，]/).map(a => a.trim()).filter(a => a);
+
+                if (answers.length === 0) {
+                    showAlert('请输入正确答案');
+                    return;
+                }
+
+                // 检查是否有非法字符
+                const invalid = answers.find(a => !validLabels.includes(a));
+                if (invalid) {
+                    showAlert(`正确答案中包含无效选项 "${invalid}"。<br>当前有效选项范围：${validLabels.join(', ')}`);
+                    return;
+                }
+                answer = answers;
+            } else {
+                // 单选题
+                if (!answerVal) {
+                    showAlert('请输入正确答案');
+                    return;
+                }
+                if (!validLabels.includes(answerVal)) {
+                    showAlert(`正确答案 "${answerVal}" 无效。<br>当前有效选项范围：${validLabels.join(', ')}`);
+                    return;
+                }
+                answer = answerVal;
+            }
+        }
+
+        if (!content) { showAlert('请输入题目内容'); return; }
+
+        // 显示保存中状态
+        const btn = document.querySelector('button[onclick^="saveQuestion"]');
+        if (btn) {
+            btn.textContent = '保存中...';
+            btn.disabled = true;
+        }
+
+        const question = { type, category, deviceType, content, options, answer };
+        if (editingQuestion) {
+            await Storage.updateQuestion({ ...question, id: editingQuestion.id });
+        } else {
+            await Storage.addQuestion(question);
+        }
+        cancelQuestionEdit();
+        await refreshCache();
+        loadQuestions();
+    } catch (e) {
+        console.error('Save question failed', e);
+        showAlert('保存失败：' + e.message);
+
+        // 恢复按钮状态
+        const btn = document.querySelector('button[onclick^="saveQuestion"]');
+        if (btn) {
+            btn.textContent = '保存';
+            btn.disabled = false;
+        }
     }
-
-    if (!content) { alert('请输入题目内容'); return; }
-
-    const question = { type, category, content, options, answer };
-    if (editingQuestion) {
-        await Storage.updateQuestion({ ...question, id: editingQuestion.id });
-    } else {
-        await Storage.addQuestion(question);
-    }
-    cancelQuestionEdit();
-    await refreshCache();
-    loadQuestions();
 }
+
 
 function cancelQuestionEdit() {
     editingQuestion = null;
@@ -414,13 +777,7 @@ function cancelQuestionEdit() {
     if (editor) editor.classList.add('hidden'); // 隐藏内嵌编辑器
 }
 
-async function deleteQuestion(id) {
-    if (confirm('确定删除此题目？')) {
-        await Storage.deleteQuestion(id);
-        await refreshCache();
-        loadQuestions();
-    }
-}
+
 
 // ========== 试卷管理 ==========
 let paperRules = [];
@@ -432,15 +789,66 @@ function loadPaperGroups() { }
 function loadPapers() {
     const papers = cachedData.papers;
     const groups = cachedData.groups;
-    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead>
-    <tbody>${papers.map(p => `<tr><td>${p.name}</td><td>${p.publishDate || p.createDate || '-'}</td>
-      <td>${p.published ? `<span class="badge badge-success">已推送</span>` : `<span class="badge badge-warning">未推送</span>`}</td>
+    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>创建日期</th><th>推送记录</th><th>操作</th></tr></thead>
+    <tbody>${papers.map(p => `<tr><td>${escapeHtml(p.name)}</td><td>${p.createDate || '-'}</td>
+      <td><button class="btn btn-sm btn-secondary" onclick="showPushLogs('${p.id}')">查看记录</button></td>
       <td>
-        ${!p.published ? `<button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>` : ''}
+        <button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>
         <button class="btn btn-sm btn-danger" onclick="deletePaper('${p.id}')">删除</button>
       </td></tr>`).join('')}</tbody></table>` : '<p class="text-muted">暂无试卷</p>';
     document.getElementById('papers-list').innerHTML = html;
 }
+
+async function showPushLogs(paperId) {
+    const paper = cachedData.papers.find(p => p.id === paperId);
+    const logs = await Storage.getPushLogs(paperId);
+    const groups = cachedData.groups;
+    const users = cachedData.users;
+
+    if (logs.length === 0) {
+        openModal('推送记录 - ' + paper.name,
+            '<div class="empty-state"><p>该试卷尚未推送过</p></div>',
+            '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+        return;
+    }
+
+    const formatTime = (isoStr) => {
+        const d = new Date(isoStr);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+
+    const getGroupNames = (ids) => ids.map(id => groups.find(g => g.id === id)?.name || id).join('、') || '-';
+    const getUserNames = (ids) => ids.map(id => users.find(u => u.id === id)?.username || id).join('、') || '-';
+
+    const bodyHtml = `
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>推送时间</th>
+                        <th>目标分组</th>
+                        <th>目标用户</th>
+                        <th>截止时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${logs.map(log => `
+                        <tr>
+                            <td>${formatTime(log.pushTime)}</td>
+                            <td>${getGroupNames(log.targetGroups)}</td>
+                            <td>${getUserNames(log.targetUsers)}</td>
+                            <td>${log.deadline || '-'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    openModal('推送记录 - ' + paper.name, bodyHtml,
+        '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+}
+
 
 function showPaperEditor() {
     document.getElementById('btn-create-paper').classList.add('hidden');
@@ -467,7 +875,7 @@ function addRuleRow() {
     const availableTypes = allTypes.filter(t => !usedTypes.includes(t));
 
     if (availableTypes.length === 0) {
-        alert('所有题型已添加');
+        showAlert('所有题型已添加');
         return;
     }
 
@@ -577,12 +985,12 @@ function enableGenerateButtons() {
 
 function validateRules() {
     const name = document.getElementById('paper-name').value.trim();
-    if (!name) { alert('请输入试卷名称'); return; }
-    if (paperRules.length === 0) { alert('请至少添加一个题型规则'); return; }
+    if (!name) { showAlert('请输入试卷名称'); return; }
+    if (paperRules.length === 0) { showAlert('请至少添加一个题型规则'); return; }
 
     const total = calculateTotalScore();
     if (total !== 100) {
-        alert('总分需等于100分，当前总分：' + total + '分');
+        showAlert('总分需等于100分，当前总分：' + total + '分');
         return;
     }
 
@@ -591,18 +999,18 @@ function validateRules() {
         const available = questions.filter(q => q.type === rule.type).length;
         if (available < rule.count) {
             const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
-            alert(typeNames[rule.type] + '数量不足！需要' + rule.count + '题，题库仅有' + available + '题');
+            showAlert(typeNames[rule.type] + '数量不足！需要' + rule.count + '题，题库仅有' + available + '题');
             return;
         }
     }
 
     rulesValidated = true;
     enableGenerateButtons();
-    alert('校验成功！请选择"手动选择题目"或"自动生成题目"');
+    showAlert('校验成功！请选择"手动选择题目"或"自动生成题目"');
 }
 
 function showManualSelect() {
-    if (!rulesValidated) { alert('请先校验试卷规则'); return; }
+    if (!rulesValidated) { showAlert('请先校验试卷规则'); return; }
 
     selectedQuestions = {};
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
@@ -645,7 +1053,7 @@ function toggleQuestion(type, questionId, maxCount, checked) {
 
     if (checked) {
         if (selectedQuestions[type].length >= maxCount) {
-            alert(`该题型最多选择${maxCount}题`);
+            showAlert(`该题型最多选择${maxCount}题`);
             event.target.checked = false;
             return;
         }
@@ -664,7 +1072,7 @@ async function generatePaperFromSelection() {
         const count = (selectedQuestions[rule.type] || []).length;
         if (count !== rule.count) {
             const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
-            alert(`${typeNames[rule.type]}需要选择${rule.count}题，当前已选${count}题`);
+            showAlert(`${typeNames[rule.type]}需要选择${rule.count}题，当前已选${count}题`);
             return;
         }
     }
@@ -677,14 +1085,14 @@ async function generatePaperFromSelection() {
     };
 
     await Storage.addPaper(paper);
-    alert('试卷创建成功！');
+    showAlert('试卷创建成功！');
     cancelPaperEdit();
     await refreshCache();
     loadPapers();
 }
 
 async function autoGeneratePaper() {
-    if (!rulesValidated) { alert('请先校验试卷规则'); return; }
+    if (!rulesValidated) { showAlert('请先校验试卷规则'); return; }
 
     const name = document.getElementById('paper-name').value.trim();
     const questions = cachedData.questions;
@@ -704,46 +1112,131 @@ async function autoGeneratePaper() {
     };
 
     await Storage.addPaper(paper);
-    alert('试卷自动生成成功！');
+    showAlert('试卷自动生成成功！');
     cancelPaperEdit();
     await refreshCache();
     loadPapers();
 }
 
-function showPublishModal(paperId) {
-    const groups = cachedData.groups;
-    openModal('推送试卷',
-        `<div class="form-group"><label class="form-label">目标分组</label>
-         <select class="form-select" id="publish-groups" multiple style="height:120px;">
-           ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
-         </select></div>
-         <div class="form-group"><label class="form-label">截止日期</label>
-           <input type="date" class="form-input" id="publish-deadline"></div>`,
-        `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
-         <button class="btn btn-primary" onclick="publishPaper('${paperId}')">确认推送</button>`);
-}
-
 async function publishPaper(paperId) {
-    const select = document.getElementById('publish-groups');
-    const targetGroups = Array.from(select.selectedOptions).map(o => o.value);
-    const deadline = document.getElementById('publish-deadline').value;
+    const groupItems = document.querySelectorAll('#selector-groups .selector-item.selected');
+    const userItems = document.querySelectorAll('#selector-users .selector-item.selected');
 
-    if (!targetGroups.length || !deadline) { alert('请选择分组和截止日期'); return; }
+    const targetGroups = Array.from(groupItems).map(item => item.dataset.id);
+    const targetUsers = Array.from(userItems).map(item => item.dataset.id);
+    const deadlineVal = document.getElementById('publish-deadline').value;
 
-    await Storage.publishPaper(paperId, targetGroups, deadline);
+    if (!targetGroups.length && !targetUsers.length) {
+        showAlert('请至少选择一个目标分组或目标用户');
+        return;
+    }
+    if (!deadlineVal) {
+        showAlert('请选择截止时间');
+        return;
+    }
+
+    const deadline = deadlineVal.replace('T', ' ');
+    await Storage.publishPaper(paperId, targetGroups, targetUsers, deadline);
     closeModal();
     await refreshCache();
     loadPapers();
-    alert('试卷推送成功！');
+    showAlert('试卷推送成功！');
 }
 
-async function deletePaper(id) {
-    if (confirm('确定删除此试卷？')) {
-        await Storage.deletePaper(id);
-        await refreshCache();
-        loadPapers();
+function showPublishModal(paperId) {
+    const paper = cachedData.papers.find(p => p.id === paperId);
+    const groups = cachedData.groups;
+    const users = cachedData.users.filter(u => u.role === 'student');
+
+    // 预填充已选分组和截止时间
+    const currentGroups = paper?.targetGroups || [];
+    const currentUsers = paper?.targetUsers || [];
+
+    // 默认截止时间为当前时间+3天
+    let defaultDeadline = "";
+    if (paper?.deadline) {
+        defaultDeadline = paper.deadline.replace(' ', 'T');
+    } else {
+        const now = new Date();
+        const future = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+        defaultDeadline = future.toISOString().slice(0, 16);
     }
+
+    const bodyHtml = `
+        <div class="publish-grid">
+            <div class="selector-column">
+                <label class="form-label">推送到分组</label>
+                <div class="selector-container" id="selector-groups">
+                    <div class="selector-search">
+                        <input type="text" class="form-input" placeholder="搜索分组..." onkeyup="filterSelectorItems('selector-groups', this.value)">
+                    </div>
+                    <div class="selector-list">
+                        ${groups.map(g => `
+                            <div class="selector-item ${currentGroups.includes(g.id) ? 'selected' : ''}" data-id="${g.id}" data-name="${g.name.toLowerCase()}" onclick="toggleSelectorItem(this)">
+                                <div class="selector-checkbox"></div>
+                                <div class="selector-item-info">
+                                    <div class="selector-item-name">${escapeHtml(g.name)}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            <div class="selector-column">
+                <label class="form-label">推送到特定用户</label>
+                <div class="selector-container" id="selector-users">
+                    <div class="selector-search">
+                        <input type="text" class="form-input" placeholder="搜索用户..." onkeyup="filterSelectorItems('selector-users', this.value)">
+                    </div>
+                    <div class="selector-list">
+                        ${users.map(u => {
+        const groupName = groups.find(g => g.id === u.groupId)?.name || '未分组';
+        return `
+                                <div class="selector-item ${currentUsers.includes(u.id) ? 'selected' : ''}" data-id="${u.id}" data-name="${u.username.toLowerCase()} ${groupName.toLowerCase()}" onclick="toggleSelectorItem(this)">
+                                    <div class="selector-checkbox"></div>
+                                    <div class="selector-item-info">
+                                        <div class="selector-item-name">${escapeHtml(u.username)}</div>
+                                        <div class="selector-item-desc">${escapeHtml(groupName)}</div>
+                                    </div>
+                                </div>
+                            `;
+    }).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="form-group" style="margin-top:20px;">
+            <label class="form-label">截止时间 (日期+时间)</label>
+            <input type="datetime-local" class="form-input" id="publish-deadline" value="${defaultDeadline}">
+        </div>
+    `;
+
+    openModal('推送试卷 - ' + paper.name, bodyHtml, `
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="publishPaper('${paperId}')">确认推送</button>
+    `);
 }
+
+function toggleSelectorItem(item) {
+    item.classList.toggle('selected');
+}
+
+function filterSelectorItems(containerId, query) {
+    const container = document.getElementById(containerId);
+    const items = container.querySelectorAll('.selector-item');
+    const lowerQuery = query.toLowerCase();
+
+    items.forEach(item => {
+        const name = item.dataset.name;
+        if (name.includes(lowerQuery)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+
 
 // ========== 管理员排行榜 ==========
 function loadAdminRankingOptions() {
@@ -780,8 +1273,12 @@ function exportQuestions() {
     ['single', 'multiple', 'judge'].forEach(type => {
         const typeName = types[type];
         const data = questions.filter(q => q.type === type).map(q => {
+            // Helper to get name from ID
+            const getCatName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '';
+
             const row = {
-                '专业': q.category,
+                '专业': getCatName(q.category),
+                '设备类型': getCatName(q.deviceType),
                 '题目': q.content,
                 '正确答案': Array.isArray(q.answer) ? q.answer.join(',') :
                     (type === 'judge' ? (q.answer === 'true' ? 'A' : 'B') : q.answer)
@@ -805,7 +1302,7 @@ function exportQuestions() {
             });
 
             // Ensure headers
-            const header = ['专业', '题目', '正确答案'];
+            const header = ['专业', '设备类型', '题目', '正确答案'];
             for (let i = 0; i < maxOptions; i++) {
                 header.push('选项' + String.fromCharCode(65 + i));
             }
@@ -814,7 +1311,7 @@ function exportQuestions() {
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         } else {
             // Create empty sheet with header
-            const ws = XLSX.utils.json_to_sheet([], { header: ['专业', '题目', '正确答案', '选项A', '选项B'] });
+            const ws = XLSX.utils.json_to_sheet([], { header: ['专业', '设备类型', '题目', '正确答案', '选项A', '选项B', '选项C', '选项D'] });
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         }
     });
@@ -849,11 +1346,12 @@ async function importQuestions(input) {
                 const header = rows[0];
                 const getColIdx = (name) => header.indexOf(name);
                 const idxCategory = getColIdx('专业');
+                const idxDeviceType = getColIdx('设备类型');
                 const idxContent = getColIdx('题目');
                 const idxAnswer = getColIdx('正确答案');
 
-                if (idxCategory === -1 || idxContent === -1 || idxAnswer === -1) {
-                    errorMsg += `工作表"${sheetName}"缺少必要列字段(专业、题目、正确答案)\n`;
+                if (idxCategory === -1 || idxContent === -1 || idxAnswer === -1 || idxDeviceType === -1) {
+                    errorMsg += `工作表"${sheetName}"缺少必要列字段(专业、设备类型、题目、正确答案)\n`;
                     continue;
                 }
 
@@ -870,16 +1368,36 @@ async function importQuestions(input) {
                     // Skip empty rows
                     if (!row || row.length === 0) continue;
 
-                    const category = row[idxCategory];
+                    const categoryRaw = row[idxCategory];
                     const content = row[idxContent];
                     const answerRaw = row[idxAnswer];
+                    const deviceTypeRaw = row[idxDeviceType];
 
-                    if (!category || !content || answerRaw === undefined) {
-                        // Skip rows that might be calculated as empty but have some format
-                        if (!category && !content && !answerRaw) continue;
-                        errorMsg += `工作表"${sheetName}"第${i + 1}行缺少必要信息\n`;
+                    if (!categoryRaw && !content && !answerRaw && !deviceTypeRaw) continue;
+                    if (!categoryRaw || !content || answerRaw === undefined || !deviceTypeRaw) {
+                        errorMsg += `工作表"${sheetName}"第${i + 1}行缺少必要信息(专业、设备类型、题目、正确答案)\n`;
                         continue;
                     }
+
+                    // Resolve Category ID (Strict)
+                    const categoryName = String(categoryRaw).trim();
+                    const majorObj = cachedData.categories.find(c => c.type === 'major' && c.name === categoryName);
+
+                    if (!majorObj) {
+                        errorMsg += `工作表"${sheetName}"第${i + 1}行错误：找不到专业 "${categoryName}"，请先在系统设置中添加。\n`;
+                        continue;
+                    }
+                    const categoryId = majorObj.id;
+
+                    // Resolve Device Type ID (Strict)
+                    const deviceTypeName = String(deviceTypeRaw).trim();
+                    const deviceObj = cachedData.categories.find(c => c.type === 'device' && c.parentId === majorObj.id && c.name === deviceTypeName);
+
+                    if (!deviceObj) {
+                        errorMsg += `工作表"${sheetName}"第${i + 1}行错误：在专业 "${categoryName}" 下找不到设备类型 "${deviceTypeName}"。\n`;
+                        continue;
+                    }
+                    const deviceTypeId = deviceObj.id;
 
                     let options = [];
                     if (typeAlias === 'judge') {
@@ -908,7 +1426,8 @@ async function importQuestions(input) {
 
                     newQuestions.push({
                         type: typeAlias,
-                        category: String(category).trim(),
+                        category: categoryId,
+                        deviceType: deviceTypeId,
                         content: String(content).trim(),
                         options: options,
                         answer: answer
@@ -917,38 +1436,22 @@ async function importQuestions(input) {
             }
 
             if (errorMsg) {
-                alert('校验发现以下问题：\n' + errorMsg + '\n请修正后重试。');
+                showAlert('校验发现以下问题：<br><div style="text-align:left;max-height:300px;overflow-y:auto;margin-top:10px;background:#fff;color:#333;padding:10px;border-radius:4px;border:1px solid #ddd;">' + errorMsg.replace(/\n/g, '<br>') + '</div><br>请修正后重试。');
                 input.value = '';
                 return;
             }
 
             if (newQuestions.length === 0) {
-                alert('未从文件中读取到有效题目。请检查Sheet名称是否为(单选题, 多选题, 判断题)。');
+                showAlert('未从文件中读取到有效题目。<br>请检查Sheet名称是否为(单选题, 多选题, 判断题)。');
                 input.value = '';
                 return;
             }
 
-            if (confirm(`解析成功，共${newQuestions.length}道题。是否确认导入？`)) {
-                let successCount = 0;
-                for (const q of newQuestions) {
-                    try {
-                        await Storage.addQuestion(q);
-                        successCount++;
-                    } catch (err) {
-                        console.error('Add question failed', err);
-                    }
-                }
-                alert(`导入完成，成功导入 ${successCount} 道题目`);
-                input.value = '';
-                await refreshCache();
-                loadQuestions();
-            } else {
-                input.value = '';
-            }
-
+            confirmImportQuestions(newQuestions);
+            input.value = ''; // Reset
         } catch (e) {
             console.error(e);
-            alert('读取文件失败，请检查文件格式');
+            showAlert('读取文件失败，请检查文件格式');
             input.value = '';
         }
     };
@@ -956,8 +1459,20 @@ async function importQuestions(input) {
 }
 
 function handleImportClick() {
-    alert('请导出题库进行备份');
-    document.getElementById('file-import').click();
+    showConfirmModal({
+        title: '导入提醒',
+        message: '导入操作会<span style="color:var(--danger);font-weight:bold;">清空现有数据</span>，强烈建议您在操作前先导出题库进行备份。是否确认为继续导入？',
+        confirmText: '继续导入',
+        confirmType: 'danger',
+        isHtml: true,
+        onConfirm: async () => {
+            closeModal();
+            // 在模态框关闭后稍微延迟，以防焦点冲突
+            setTimeout(() => {
+                document.getElementById('file-import').click();
+            }, 200);
+        }
+    });
 }
 
 // ========== 考试分析 ==========
@@ -1042,9 +1557,195 @@ async function clearPaperRecords() {
     const paperId = document.getElementById('analysis-paper-select').value;
     if (!paperId) return;
 
-    if (confirm('确定要清空该试卷的所有考试记录吗？此操作不可撤销，且会同时清空得分及排行榜统计。')) {
-        await Storage.deletePaperRecords(paperId);
-        alert('记录已清空');
-        loadAdminAnalysis(paperId);
+    clearExamRecords(paperId);
+}
+
+// 全局确认回调
+let pendingConfirmCallback = null;
+
+function showConfirmModal({ title, message, onConfirm, confirmText = '确定', confirmType = 'danger', isHtml = false }) {
+    pendingConfirmCallback = onConfirm;
+
+    const content = isHtml ? message : escapeHtml(message).replace(/\n/g, '<br>');
+
+    const bodyHtml = `
+        <div style="padding:16px 0;font-size:15px;color:var(--text-primary);line-height:1.6;">
+            ${content}
+        </div>
+    `;
+    const btnClass = confirmType === 'danger' ? 'btn-danger' : 'btn-success';
+    const footerHtml = `
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn ${btnClass}" onclick="executeConfirm()">${confirmText}</button>
+    `;
+    openModal(title, bodyHtml, footerHtml);
+}
+
+async function executeConfirm() {
+    // 获取确认按钮以显示加载状态
+    const btn = document.querySelector('#modal-footer .btn-danger, #modal-footer .btn-success, #modal-footer .btn-primary');
+    const originalText = btn ? btn.textContent : '确定';
+
+    if (btn) {
+        btn.textContent = '处理中...';
+        btn.disabled = true;
     }
+
+    try {
+        if (pendingConfirmCallback) {
+            await pendingConfirmCallback();
+        }
+        closeModal();
+    } catch (e) {
+        console.error(e);
+        showAlert('操作失败，请重试');
+        if (btn) {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+}
+
+// 替换原 deleteMajor
+function deleteMajor(id) {
+    showConfirmModal({
+        title: '删除专业',
+        message: '删除此专业将同时删除其下所有设备类型，确定继续？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteCategory(id);
+            await refreshCache();
+            if (selectedMajorId === id) {
+                const remaining = cachedData.categories.filter(c => c.type === 'major');
+                selectedMajorId = remaining.length > 0 ? remaining[0].id : null;
+            }
+            showCategorySettings();
+        }
+    });
+}
+
+// 替换原 deleteDevice
+function deleteDevice(id) {
+    showConfirmModal({
+        title: '删除设备类型',
+        message: '确定删除此设备类型吗？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteCategory(id);
+            await refreshCache();
+            document.getElementById('devices-panel').innerHTML = renderDevicesPanel();
+        }
+    });
+}
+
+// 替换 deleteGroup 
+async function deleteGroup(id) {
+    const hasUsers = cachedData.users.some(u => u.groupId === id);
+    if (hasUsers) {
+        showAlert('无法删除：该分组下仍有用户。请先将用户移动到其他分组或删除用户。');
+        return;
+    }
+
+    showConfirmModal({
+        title: '删除分组',
+        message: '确定删除此分组？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteGroup(id);
+            await refreshCache();
+            loadGroups();
+        }
+    });
+}
+
+// 替换 deleteUser
+async function deleteUser(id) {
+    showConfirmModal({
+        title: '删除用户',
+        message: '确定删除此用户？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteUser(id);
+            await refreshCache();
+            loadUsers();
+        }
+    });
+}
+
+// 替换 deleteQuestion
+async function deleteQuestion(id) {
+    showConfirmModal({
+        title: '删除题目',
+        message: '确定删除此题目？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteQuestion(id);
+            await refreshCache();
+            loadQuestions();
+        }
+    });
+}
+
+// 替换 deletePaper
+async function deletePaper(id) {
+    showConfirmModal({
+        title: '删除试卷',
+        message: '确定删除此试卷？',
+        confirmText: '确定删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deletePaper(id);
+            await refreshCache();
+            loadPapers();
+        }
+    });
+}
+
+// 替换 importQuestions 中的 confirm
+function confirmImportQuestions(newQuestions) {
+    showConfirmModal({
+        title: '确认导入',
+        message: `解析成功，共${newQuestions.length}道题。<br>确认导入吗？这将<span style="color:var(--danger);font-weight:bold;">彻底清空</span>现有题库。`,
+        confirmText: '确认清空并导入',
+        confirmType: 'danger',
+        isHtml: true,
+        onConfirm: async () => {
+            // 批量导入逻辑
+            try {
+                // 1. 先清空
+                await Storage.deleteAllQuestions();
+                // 2. 再添加
+                await Promise.all(newQuestions.map(q => Storage.addQuestion(q)));
+
+                showAlert(`已清空旧数据并成功导入 ${newQuestions.length} 道题目`);
+                closeModal();
+                // 重新加载题目列表
+                await refreshCache();
+                loadQuestions();
+            } catch (err) {
+                console.error(err);
+                showAlert('导入出错：' + err.message);
+            }
+        }
+    });
+}
+
+// 替换 clearExamRecords
+async function clearExamRecords(paperId) {
+    showConfirmModal({
+        title: '清空考试记录',
+        message: '确定要清空该试卷的所有考试记录吗？\n此操作不可撤销，且会同时清空得分及排行榜统计。',
+        confirmText: '确定清空',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deletePaperRecords(paperId); // Changed to deletePaperRecords as per original logic
+            showAlert('记录已清空');
+            loadAdminAnalysis(paperId); // 刷新分析页面
+        }
+    });
 }

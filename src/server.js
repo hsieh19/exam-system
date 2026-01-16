@@ -110,8 +110,41 @@ async function startServer() {
         res.json(db.updateQuestion(question));
     });
 
+    app.delete('/api/questions/all', (req, res) => {
+        db.deleteAllQuestions();
+        res.json({ success: true });
+    });
+
     app.delete('/api/questions/:id', (req, res) => {
         db.deleteQuestion(req.params.id);
+        res.json({ success: true });
+    });
+
+    // ==================== 专业分类接口 ====================
+    app.get('/api/categories', (req, res) => {
+        res.json(db.getCategories());
+    });
+
+    app.get('/api/categories/majors', (req, res) => {
+        res.json(db.getMajors());
+    });
+
+    app.get('/api/categories/devices/:majorId', (req, res) => {
+        res.json(db.getDeviceTypes(req.params.majorId));
+    });
+
+    app.post('/api/categories', (req, res) => {
+        const cat = { id: 'cat_' + Date.now(), ...req.body };
+        res.json(db.addCategory(cat));
+    });
+
+    app.put('/api/categories/:id', (req, res) => {
+        const cat = { ...req.body, id: req.params.id };
+        res.json(db.updateCategory(cat));
+    });
+
+    app.delete('/api/categories/:id', (req, res) => {
+        db.deleteCategory(req.params.id);
         res.json({ success: true });
     });
 
@@ -148,14 +181,39 @@ async function startServer() {
         if (!existing) {
             return res.status(404).json({ error: '试卷不存在' });
         }
+
+        const targetGroups = req.body.targetGroups || [];
+        const targetUsers = req.body.targetUsers || [];
+        const deadline = req.body.deadline;
+        const pushTime = new Date().toISOString();
+
+        // 更新试卷的最新推送信息
         const paper = {
             ...existing,
             published: true,
-            targetGroups: req.body.targetGroups,
-            deadline: req.body.deadline,
-            publishDate: new Date().toISOString().split('T')[0]
+            targetGroups,
+            targetUsers,
+            deadline,
+            publishDate: pushTime.split('T')[0]
         };
-        res.json(db.updatePaper(paper));
+        db.updatePaper(paper);
+
+        // 记录推送日志
+        db.addPushLog({
+            id: 'pl_' + Date.now(),
+            paperId: req.params.id,
+            pushTime,
+            targetGroups,
+            targetUsers,
+            deadline
+        });
+
+        res.json(paper);
+    });
+
+    app.get('/api/papers/:id/push-logs', (req, res) => {
+        const logs = db.getPushLogsByPaper(req.params.id);
+        res.json(logs);
     });
 
     app.delete('/api/papers/:id', (req, res) => {
@@ -168,12 +226,21 @@ async function startServer() {
         if (!user) return res.json([]);
 
         const papers = db.getPapers();
-        const now = new Date().toISOString().split('T')[0];
-
         const available = papers.filter(p => {
             if (!p.published) return false;
-            if (!p.targetGroups.includes(user.groupId)) return false;
-            if (p.deadline && p.deadline < now) return false;
+
+            // 检查是否在目标组或目标用户中
+            const isInGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+            const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
+            if (!isInGroup && !isTargetUser) return false;
+
+            // 如果有截止日期，检查是否过期
+            if (p.deadline) {
+                const now = new Date();
+                const deadline = new Date(p.deadline.replace(' ', 'T'));
+                if (deadline < now) return false;
+            }
+
             if (db.hasUserTakenExam(user.id, p.id)) return false;
             return true;
         });

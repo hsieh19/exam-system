@@ -44,6 +44,7 @@
   </div>
 
   <script src="js/storage.js"></script>
+  <script src="js/utils.js"></script>
   <script src="js/auth.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -105,7 +106,7 @@
           }
         } catch (err) {
           console.error('Login error:', err);
-          alert('登录发生错误: ' + err.message + '\n请检查服务器是否运行，或按 F12 查看控制台。');
+          showAlert('登录发生错误: ' + err.message + '\n请检查服务器是否运行，或按 F12 查看控制台。');
           // 恢复按钮
           btn.disabled = false;
           btn.textContent = originalText;

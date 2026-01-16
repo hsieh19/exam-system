@@ -123,6 +123,39 @@ const Storage = {
     return authFetch(`${API_BASE}/api/groups/${id}`, { method: 'DELETE' });
   },
 
+  // ==================== 专业分类相关 ====================
+  getCategories() {
+    return authFetch(`${API_BASE}/api/categories`).then(r => r.json());
+  },
+
+  getMajors() {
+    return authFetch(`${API_BASE}/api/categories/majors`).then(r => r.json());
+  },
+
+  getDeviceTypes(majorId) {
+    return authFetch(`${API_BASE}/api/categories/devices/${majorId}`).then(r => r.json());
+  },
+
+  addCategory(cat) {
+    return authFetch(`${API_BASE}/api/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cat)
+    }).then(r => r.json());
+  },
+
+  updateCategory(cat) {
+    return authFetch(`${API_BASE}/api/categories/${cat.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cat)
+    }).then(r => r.json());
+  },
+
+  deleteCategory(id) {
+    return authFetch(`${API_BASE}/api/categories/${id}`, { method: 'DELETE' });
+  },
+
   // ==================== 题目相关 ====================
   getQuestions() {
     return authFetch(`${API_BASE}/api/questions`).then(r => r.json());
@@ -148,6 +181,10 @@ const Storage = {
     return authFetch(`${API_BASE}/api/questions/${id}`, { method: 'DELETE' });
   },
 
+  deleteAllQuestions() {
+    return authFetch(`${API_BASE}/api/questions/all`, { method: 'DELETE' });
+  },
+
   // ==================== 试卷相关 ====================
   getPapers() {
     return authFetch(`${API_BASE}/api/papers`).then(r => r.json());
@@ -169,16 +206,20 @@ const Storage = {
     return this.addPaper(paper);
   },
 
-  publishPaper(paperId, targetGroups, deadline) {
+  publishPaper(paperId, targetGroups, targetUsers, deadline) {
     return authFetch(`${API_BASE}/api/papers/${paperId}/publish`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetGroups, deadline })
+      body: JSON.stringify({ targetGroups, targetUsers, deadline })
     }).then(r => r.json());
   },
 
   deletePaper(id) {
     return authFetch(`${API_BASE}/api/papers/${id}`, { method: 'DELETE' });
+  },
+
+  getPushLogs(paperId) {
+    return authFetch(`${API_BASE}/api/papers/${paperId}/push-logs`).then(r => r.json());
   },
 
   getPapersForUser(userId) {
@@ -205,33 +246,5 @@ const Storage = {
     return authFetch(`${API_BASE}/api/records/paper/${paperId}`, {
       method: 'DELETE'
     }).then(r => r.json());
-  }
-};
-
-// 兼容同步调用的包装器
-const StorageSync = {
-  _cache: {},
-
-  async init() {
-    // 预加载常用数据
-    this._cache.groups = await Storage.getGroups();
-    this._cache.questions = await Storage.getQuestions();
-    this._cache.papers = await Storage.getPapers();
-    this._cache.users = await Storage.getUsers();
-    this._cache.records = await Storage.getRecords();
-  },
-
-  getGroups() { return this._cache.groups || []; },
-  getQuestions() { return this._cache.questions || []; },
-  getPapers() { return this._cache.papers || []; },
-  getUsers() { return this._cache.users || []; },
-  getRecords() { return this._cache.records || []; },
-
-  getCurrentUser() { return Storage.getCurrentUser(); },
-  setCurrentUser(user) { Storage.setCurrentUser(user); },
-  logout() { Storage.logout(); },
-
-  async refresh() {
-    await this.init();
   }
 };

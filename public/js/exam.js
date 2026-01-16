@@ -10,10 +10,10 @@ document.addEventListener('DOMContentLoaded', async function () {
     if (!user) return;
 
     const paperId = sessionStorage.getItem('current_paper_id');
-    if (!paperId) { alert('未选择试卷'); window.location.href = 'student.html'; return; }
+    if (!paperId) { showAlert('未选择试卷', () => window.location.href = 'student.html'); return; }
 
     paper = await Storage.getPaperById(paperId);
-    if (!paper) { alert('试卷不存在'); window.location.href = 'student.html'; return; }
+    if (!paper) { showAlert('试卷不存在', () => window.location.href = 'student.html'); return; }
 
     await initExam();
 });
@@ -203,9 +203,10 @@ async function submitExam() {
         answers: userAnswers
     });
 
-    alert(`考试完成！\n得分：${score} 分\n用时：${Math.floor(totalSeconds / 60)}分${totalSeconds % 60}秒`);
-    sessionStorage.removeItem('current_paper_id');
-    window.location.href = 'student.html';
+    showAlert(`考试完成！\n得分：${score} 分\n用时：${Math.floor(totalSeconds / 60)}分${totalSeconds % 60}秒`, () => {
+        sessionStorage.removeItem('current_paper_id');
+        window.location.href = 'student.html';
+    });
 }
 
 window.addEventListener('beforeunload', function (e) {

@@ -79,9 +79,24 @@ async function initDatabase() {
       content TEXT NOT NULL,
       options TEXT,
       answer TEXT NOT NULL,
-      category TEXT
+      category TEXT,
+      deviceType TEXT
     );
   `);
+
+    // 数据库迁移：确保 questions 表有 category 和 deviceType 字段
+    try {
+        const columns = db.exec("PRAGMA table_info(questions)")[0].values.map(v => v[1]);
+        if (!columns.includes('category')) {
+            db.run("ALTER TABLE questions ADD COLUMN category TEXT");
+        }
+        if (!columns.includes('deviceType')) {
+            db.run("ALTER TABLE questions ADD COLUMN deviceType TEXT");
+        }
+    } catch (e) {
+        console.error('Migration failed:', e);
+        // Ignore if error (e.g. column already exists race condition, though unlikely)
+    }
 
     db.run(`
     CREATE TABLE IF NOT EXISTS papers (
@@ -91,6 +106,7 @@ async function initDatabase() {
       questions TEXT,
       published INTEGER DEFAULT 0,
       targetGroups TEXT,
+      targetUsers TEXT,
       deadline TEXT,
       publishDate TEXT,
       createDate TEXT
@@ -106,6 +122,26 @@ async function initDatabase() {
       totalTime INTEGER,
       answers TEXT,
       submitTime TEXT
+    );
+  `);
+
+    db.run(`
+    CREATE TABLE IF NOT EXISTS push_logs (
+      id TEXT PRIMARY KEY,
+      paperId TEXT NOT NULL,
+      pushTime TEXT NOT NULL,
+      targetGroups TEXT,
+      targetUsers TEXT,
+      deadline TEXT
+    );
+  `);
+
+    db.run(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      parentId TEXT
     );
   `);
 
@@ -233,19 +269,25 @@ module.exports = {
     },
 
     addQuestion(q) {
-        runQuery("INSERT INTO questions (id, type, content, options, answer, category) VALUES (?, ?, ?, ?, ?, ?)",
-            [q.id, q.type, q.content, JSON.stringify(q.options), JSON.stringify(q.answer), q.category || '']);
+        const answer = q.type === 'multiple' ? JSON.stringify(q.answer) : q.answer;
+        runQuery("INSERT INTO questions (id, type, content, options, answer, category, deviceType) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [q.id, q.type, q.content, JSON.stringify(q.options), answer, q.category || '', q.deviceType || '']);
         return q;
     },
 
     updateQuestion(q) {
-        runQuery("UPDATE questions SET type = ?, content = ?, options = ?, answer = ?, category = ? WHERE id = ?",
-            [q.type, q.content, JSON.stringify(q.options), JSON.stringify(q.answer), q.category || '', q.id]);
+        const answer = q.type === 'multiple' ? JSON.stringify(q.answer) : q.answer;
+        runQuery("UPDATE questions SET type = ?, content = ?, options = ?, answer = ?, category = ?, deviceType = ? WHERE id = ?",
+            [q.type, q.content, JSON.stringify(q.options), answer, q.category || '', q.deviceType || '', q.id]);
         return q;
     },
 
     deleteQuestion(id) {
         runQuery("DELETE FROM questions WHERE id = ?", [id]);
+    },
+
+    deleteAllQuestions() {
+        runQuery("DELETE FROM questions");
     },
 
     getPapers() {
@@ -255,6 +297,7 @@ module.exports = {
             rules: r.rules ? JSON.parse(r.rules) : [],
             questions: r.questions ? JSON.parse(r.questions) : {},
             targetGroups: r.targetGroups ? JSON.parse(r.targetGroups) : [],
+            targetUsers: r.targetUsers ? JSON.parse(r.targetUsers) : [],
             published: !!r.published
         }));
     },
@@ -268,17 +311,19 @@ module.exports = {
             rules: r.rules ? JSON.parse(r.rules) : [],
             questions: r.questions ? JSON.parse(r.questions) : {},
             targetGroups: r.targetGroups ? JSON.parse(r.targetGroups) : [],
+            targetUsers: r.targetUsers ? JSON.parse(r.targetUsers) : [],
             published: !!r.published
         };
     },
 
     addPaper(paper) {
-        runQuery("INSERT INTO papers (id, name, rules, questions, published, targetGroups, deadline, publishDate, createDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        runQuery("INSERT INTO papers (id, name, rules, questions, published, targetGroups, targetUsers, deadline, publishDate, createDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [paper.id, paper.name,
             JSON.stringify(paper.rules || []),
             JSON.stringify(paper.questions || {}),
             paper.published ? 1 : 0,
             JSON.stringify(paper.targetGroups || []),
+            JSON.stringify(paper.targetUsers || []),
             paper.deadline || null,
             paper.publishDate || null,
             paper.createDate || new Date().toISOString().split('T')[0]]);
@@ -286,12 +331,13 @@ module.exports = {
     },
 
     updatePaper(paper) {
-        runQuery("UPDATE papers SET name = ?, rules = ?, questions = ?, published = ?, targetGroups = ?, deadline = ?, publishDate = ? WHERE id = ?",
+        runQuery("UPDATE papers SET name = ?, rules = ?, questions = ?, published = ?, targetGroups = ?, targetUsers = ?, deadline = ?, publishDate = ? WHERE id = ?",
             [paper.name,
             JSON.stringify(paper.rules || []),
             JSON.stringify(paper.questions || {}),
             paper.published ? 1 : 0,
             JSON.stringify(paper.targetGroups || []),
+            JSON.stringify(paper.targetUsers || []),
             paper.deadline || null,
             paper.publishDate || null,
             paper.id]);
@@ -334,5 +380,55 @@ module.exports = {
     hasUserTakenExam(userId, paperId) {
         const results = execQuery("SELECT id FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
         return results.length > 0;
+    },
+
+    // 推送记录相关
+    addPushLog(log) {
+        runQuery("INSERT INTO push_logs (id, paperId, pushTime, targetGroups, targetUsers, deadline) VALUES (?, ?, ?, ?, ?, ?)",
+            [log.id || 'pl_' + Date.now(),
+            log.paperId,
+            log.pushTime || new Date().toISOString(),
+            JSON.stringify(log.targetGroups || []),
+            JSON.stringify(log.targetUsers || []),
+            log.deadline || null]);
+        return log;
+    },
+
+    getPushLogsByPaper(paperId) {
+        const rows = execQuery("SELECT * FROM push_logs WHERE paperId = ? ORDER BY pushTime DESC", [paperId]);
+        return rows.map(r => ({
+            ...r,
+            targetGroups: r.targetGroups ? JSON.parse(r.targetGroups) : [],
+            targetUsers: r.targetUsers ? JSON.parse(r.targetUsers) : []
+        }));
+    },
+
+    // 专业分类相关
+    getCategories() {
+        return execQuery("SELECT * FROM categories ORDER BY type, name");
+    },
+
+    getMajors() {
+        return execQuery("SELECT * FROM categories WHERE type = 'major' ORDER BY name");
+    },
+
+    getDeviceTypes(majorId) {
+        return execQuery("SELECT * FROM categories WHERE type = 'device' AND parentId = ? ORDER BY name", [majorId]);
+    },
+
+    addCategory(cat) {
+        runQuery("INSERT INTO categories (id, name, type, parentId) VALUES (?, ?, ?, ?)",
+            [cat.id || 'cat_' + Date.now(), cat.name, cat.type, cat.parentId || null]);
+        return cat;
+    },
+
+    updateCategory(cat) {
+        runQuery("UPDATE categories SET name = ? WHERE id = ?", [cat.name, cat.id]);
+        return cat;
+    },
+
+    deleteCategory(id) {
+        // 删除专业时，同时删除其下的设备类型
+        runQuery("DELETE FROM categories WHERE id = ? OR parentId = ?", [id, id]);
     }
 };
