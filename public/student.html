@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业考试系统 - 考生</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>企业考试系统</h2>
+                <p>在线考试平台</p>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-item active" data-page="exam">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2">
+                        </path>
+                    </svg>
+                    考试
+                </div>
+                <div class="nav-item" data-page="ranking">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 20V10M18 20V4M6 20v-4"></path>
+                    </svg>
+                    得分及排行榜
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info" id="user-info"></div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="page-exam" class="page-content">
+                <div class="page-header">
+                    <h1 class="page-title">我的考试</h1>
+                    <p class="page-subtitle">查看并参加分配给您的考试</p>
+                </div>
+                <div id="exam-list" class="exam-list"></div>
+            </div>
+
+            <div id="page-ranking" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">得分及排行榜</h1>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <select class="form-select" id="ranking-paper-select" style="min-width:250px;">
+                            <option value="">请选择试卷</option>
+                        </select>
+                    </div>
+                    <div class="card-body" id="ranking-content">
+                        <div class="empty-state">
+                            <h3>请选择试卷查看排行榜</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/student.js"></script>
+</body>
+
+</html>

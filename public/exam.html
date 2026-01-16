@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业考试系统 - 考试中</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body style="background: var(--bg-dark);">
+    <div class="exam-container">
+        <div class="exam-header">
+            <div class="exam-progress">
+                第 <strong id="current-num">1</strong> / <span id="total-num">45</span> 题
+            </div>
+            <div class="exam-timer">
+                <div class="timer-item">
+                    <div class="timer-label">本题剩余</div>
+                    <div class="timer-value" id="question-timer">15</div>
+                </div>
+                <div class="timer-item">
+                    <div class="timer-label">累计用时</div>
+                    <div class="timer-value" id="total-timer">0:00</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="question-card">
+            <div class="question-type" id="question-type">单选题</div>
+            <div class="question-content" id="question-content">题目内容加载中...</div>
+            <div class="options-list" id="options-list"></div>
+        </div>
+
+        <div class="exam-actions">
+            <button class="btn btn-primary" id="next-btn" onclick="nextQuestion()">下一题</button>
+        </div>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/exam.js"></script>
+</body>
+
+</html>

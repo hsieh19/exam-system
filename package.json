@@ -1,0 +1,21 @@
+{
+  "name": "exam-system",
+  "version": "1.0.0",
+  "description": "企业考试系统",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sql.js": "^1.8.0",
+    "cors": "^2.8.5"
+  },
+  "bin": "src/server.js",
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ]
+  }
+}

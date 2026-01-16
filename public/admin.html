@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业考试系统 - 管理员</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="js/xlsx.full.min.js"></script>
+</head>
+
+<body>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>企业考试系统</h2>
+                <p>管理后台</p>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-item active" data-page="users">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    分组及用户设置
+                </div>
+                <div class="nav-item" data-page="questions">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                    题库设置
+                </div>
+                <div class="nav-item" data-page="papers">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
+                    </svg>
+                    创建试卷
+                </div>
+                <div class="nav-item" data-page="ranking">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 20V10M18 20V4M6 20v-4"></path>
+                    </svg>
+                    得分及排行榜
+                </div>
+                <div class="nav-item" data-page="analysis">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                    考试分析
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info" id="user-info"></div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <!-- 分组及用户设置页面 -->
+            <div id="page-users" class="page-content">
+                <div class="page-header">
+                    <h1 class="page-title">分组及用户设置</h1>
+                </div>
+                <div class="flex gap-4" style="align-items:flex-start;">
+                    <div class="card" style="flex:1;">
+                        <div class="card-header">
+                            <span class="card-title">分组管理</span>
+                            <button class="btn btn-primary btn-sm" onclick="showAddGroup()">添加分组</button>
+                        </div>
+                        <div class="card-body" id="groups-list"></div>
+                    </div>
+                    <div class="card" style="flex:2;">
+                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                            <div style="display:flex;align-items:center;gap:16px;">
+                                <span class="card-title" style="font-size:14px;line-height:1.5;">用户管理</span>
+                                <input type="text" class="form-input" id="user-search-input" placeholder="搜索用户或分组"
+                                    onkeyup="filterUsers()"
+                                    style="width:200px;padding:8px 12px;font-size:13px;line-height:1.5;height:auto;">
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="showAddUser()">添加用户</button>
+                        </div>
+                        <div class="card-body" id="users-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 题库设置页面 -->
+            <div id="page-questions" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">题库设置</h1>
+                </div>
+                <div class="flex gap-3 mb-4">
+                    <button class="btn btn-primary" onclick="showAddQuestion('single')">增加单选题</button>
+                    <button class="btn btn-primary" onclick="showAddQuestion('multiple')">增加多选题</button>
+                    <button class="btn btn-primary" onclick="showAddQuestion('judge')">增加判断题</button>
+                    <div style="flex:1;"></div>
+                    <button class="btn btn-success" onclick="handleImportClick()">导入题库</button>
+                    <button class="btn btn-success" onclick="exportQuestions()">导出题库</button>
+                    <input type="file" id="file-import" accept=".xlsx,.xls" style="display:none;"
+                        onchange="importQuestions(this)">
+                </div>
+                <div id="question-editor" class="hidden"></div>
+                <div class="card">
+                    <div class="card-header"
+                        style="display:flex;align-items:center;gap:24px;justify-content:flex-start !important;">
+                        <span class="card-title" style="font-size:20px;font-weight:700;">题库列表</span>
+                        <div class="filter-group" id="question-filter-group" style="display:flex;gap:8px;">
+                            <button class="btn btn-sm btn-primary active" data-type="single"
+                                onclick="toggleQuestionFilter(this)">单选题</button>
+                            <button class="btn btn-sm btn-primary active" data-type="multiple"
+                                onclick="toggleQuestionFilter(this)">多选题</button>
+                            <button class="btn btn-sm btn-primary active" data-type="judge"
+                                onclick="toggleQuestionFilter(this)">判断题</button>
+                        </div>
+                    </div>
+                    <div class="card-body" id="questions-list"></div>
+                </div>
+            </div>
+
+            <!-- 创建试卷页面 -->
+            <div id="page-papers" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">创建试卷</h1>
+                </div>
+
+                <!-- 创建试卷按钮 -->
+                <div class="flex gap-3 mb-4">
+                    <button class="btn btn-primary" id="btn-create-paper" onclick="showPaperEditor()">创建试卷</button>
+                </div>
+
+                <!-- 试卷编辑器 -->
+                <div id="paper-editor" class="hidden">
+                    <div class="card mb-4">
+                        <div class="card-header"><span class="card-title">试卷基本信息</span></div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label class="form-label">试卷名称</label>
+                                <input type="text" class="form-input" id="paper-name" placeholder="请输入试卷名称">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 试卷规则设置 -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <span class="card-title">试卷规则设置</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table class="data-table" id="rules-table" style="table-layout:fixed;">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:140px;text-align:center;">题型</th>
+                                            <th style="width:100px;text-align:center;">数量</th>
+                                            <th style="width:100px;text-align:center;">分值</th>
+                                            <th style="width:100px;text-align:center;">漏选得分</th>
+                                            <th style="width:120px;text-align:center;">答题时限(秒)</th>
+                                            <th style="width:80px;text-align:center;">小计</th>
+                                            <th style="width:80px;text-align:center;">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="rules-body"></tbody>
+                                    <tfoot>
+                                        <tr class="total-row">
+                                            <td style="text-align:center;">
+                                                <button class="form-select" id="btn-add-rule" onclick="addRuleRow()"
+                                                    style="width:120px;cursor:pointer;text-align:center;background-image:none;">+
+                                                    添加题型</button>
+                                            </td>
+                                            <td colspan="3"></td>
+                                            <td style="text-align:right;font-size:16px;"><strong>总分：</strong></td>
+                                            <td style="text-align:center;font-size:18px;"><strong
+                                                    id="total-score">0</strong></td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="flex gap-3 mb-4">
+                        <button class="btn btn-primary" onclick="validateRules()">校验试卷规则</button>
+                        <button class="btn btn-success" id="btn-manual-select" onclick="showManualSelect()"
+                            disabled>手动选择题目</button>
+                        <button class="btn btn-success" id="btn-auto-generate" onclick="autoGeneratePaper()"
+                            disabled>自动生成题目</button>
+                        <button class="btn btn-secondary" onclick="cancelPaperEdit()">取消</button>
+                    </div>
+
+                    <!-- 手动选题区域 -->
+                    <div id="manual-select-area" class="hidden">
+                        <div class="card mb-4">
+                            <div class="card-header"><span class="card-title">手动选择题目</span></div>
+                            <div class="card-body" id="manual-select-content"></div>
+                        </div>
+                        <button class="btn btn-success" onclick="generatePaperFromSelection()">生成试卷</button>
+                    </div>
+                </div>
+
+                <!-- 已创建试卷列表 -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">已创建试卷</span></div>
+                    <div class="card-body" id="papers-list"></div>
+                </div>
+            </div>
+
+            <!-- 排行榜页面 -->
+            <div id="page-ranking" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">得分及排行榜</h1>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <select class="form-select" id="admin-ranking-select" style="min-width:250px;"></select>
+                    </div>
+                    <div class="card-body" id="admin-ranking-content">
+                        <div class="empty-state">
+                            <h3>请选择试卷查看排行榜</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 考试分析页面 -->
+            <div id="page-analysis" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">考试分析</h1>
+                </div>
+                <div class="card mb-6">
+                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <select class="form-select" id="analysis-paper-select" style="min-width:250px;">
+                            <option value="">请选择要分析的试卷</option>
+                        </select>
+                        <button class="btn btn-danger btn-sm" id="btn-clear-records" style="display:none;"
+                            onclick="clearPaperRecords()">清空本次考试记录</button>
+                    </div>
+                    <div class="card-body" id="analysis-content">
+                        <div class="empty-state">
+                            <p>请选择试卷以生成分析报告</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 模态框 -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="modal-title">标题</span>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+
+</html>
