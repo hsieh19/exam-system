@@ -37,6 +37,7 @@ function initNavigation() {
             else if (page === 'papers') { loadPaperGroups(); loadPapers(); }
             else if (page === 'ranking') loadAdminRankingOptions();
             else if (page === 'analysis') loadAdminAnalysisOptions();
+            else if (page === 'database') loadDbConfig();
         });
     });
 
@@ -1748,4 +1749,152 @@ async function clearExamRecords(paperId) {
             loadAdminAnalysis(paperId); // 刷新分析页面
         }
     });
+}
+
+// ========== 数据库管理 ==========
+const DB_TYPE_NAMES = {
+    sqlite: 'SQLite',
+    mysql: 'MySQL',
+    postgres: 'PostgreSQL'
+};
+
+async function loadDbConfig() {
+    try {
+        const config = await Storage.getDbConfig();
+        const activeDb = config.activeDb || 'sqlite';
+
+        // 更新状态徽章和按钮
+        ['sqlite', 'mysql', 'postgres'].forEach(db => {
+            const status = document.getElementById(`${db}-status`);
+            const switchBtn = document.getElementById(`btn-switch-${db}`);
+
+            if (db === activeDb) {
+                // 当前激活的数据库
+                if (status) {
+                    status.textContent = '已连接';
+                    status.style.background = 'var(--success)';
+                }
+                if (switchBtn) switchBtn.style.display = 'none';
+
+                // SQLite 特殊处理：显示导入导出按钮
+                if (db === 'sqlite') {
+                    const exportBtn = document.getElementById('btn-export-sqlite');
+                    const importBtn = document.getElementById('btn-import-sqlite');
+                    if (exportBtn) exportBtn.style.display = '';
+                    if (importBtn) importBtn.style.display = '';
+                }
+            } else {
+                // 未激活的数据库
+                if (status) {
+                    status.textContent = '未连接';
+                    status.style.background = 'var(--text-muted)';
+                }
+                if (switchBtn) switchBtn.style.display = '';
+
+                // SQLite 未激活时隐藏导入导出按钮
+                if (db === 'sqlite') {
+                    const exportBtn = document.getElementById('btn-export-sqlite');
+                    const importBtn = document.getElementById('btn-import-sqlite');
+                    if (exportBtn) exportBtn.style.display = 'none';
+                    if (importBtn) importBtn.style.display = 'none';
+                }
+            }
+        });
+    } catch (e) {
+        console.error('加载数据库配置失败:', e);
+    }
+}
+
+async function testDbConnection(dbType) {
+    if (dbType === 'sqlite') {
+        showAlert('SQLite 无需测试连接');
+        return;
+    }
+
+    try {
+        showAlert('正在测试连接...');
+        const result = await Storage.testDbConnection(dbType);
+        if (result.success) {
+            showAlert('连接成功！');
+        } else {
+            showAlert('连接失败: ' + (result.error || '未知错误'));
+        }
+    } catch (e) {
+        showAlert('测试失败: ' + e.message);
+    }
+}
+
+async function switchToDb(dbType) {
+    const dbName = DB_TYPE_NAMES[dbType];
+
+    showConfirmModal({
+        title: '切换数据库',
+        message: `确定要切换到 <strong>${dbName}</strong> 数据库吗？<br><br><span style="color:var(--danger);">注意：切换后将使用新数据库，原数据不会迁移，且需要重新登录。</span>`,
+        confirmText: '确认切换',
+        confirmType: 'danger',
+        isHtml: true,
+        onConfirm: async () => {
+            try {
+                const result = await Storage.switchDb(dbType);
+                if (result.success) {
+                    showAlert(result.message + '，即将重新登录...', () => {
+                        Storage.logout();
+                        window.location.href = 'index.html';
+                    });
+                } else {
+                    showAlert('切换失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                showAlert('切换失败: ' + e.message);
+            }
+        }
+    });
+}
+
+async function exportSqliteDb() {
+    try {
+        const blob = await Storage.exportDb();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `exam_backup_${new Date().toISOString().split('T')[0]}.db`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showAlert('数据库导出成功');
+    } catch (e) {
+        showAlert('导出失败: ' + e.message);
+    }
+}
+
+async function importSqliteDb(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    showConfirmModal({
+        title: '导入数据库',
+        message: `确定要导入 <strong>${escapeHtml(file.name)}</strong> 吗？<br><br><span style="color:var(--danger);">警告：这将完全替换当前数据库，所有现有数据将丢失！</span>`,
+        confirmText: '确认导入',
+        confirmType: 'danger',
+        isHtml: true,
+        onConfirm: async () => {
+            try {
+                const result = await Storage.importDb(file);
+                if (result.success) {
+                    showAlert(result.message, () => {
+                        Storage.logout();
+                        window.location.href = 'index.html';
+                    });
+                } else {
+                    showAlert('导入失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                showAlert('导入失败: ' + e.message);
+            }
+        }
+    });
+
+    // 重置 input，以便再次选择同一文件
+    input.value = '';
 }

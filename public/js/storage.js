@@ -246,5 +246,42 @@ const Storage = {
     return authFetch(`${API_BASE}/api/records/paper/${paperId}`, {
       method: 'DELETE'
     }).then(r => r.json());
+  },
+
+  // ==================== 数据库管理 ====================
+  getDbConfig() {
+    return authFetch(`${API_BASE}/api/db/config`).then(r => r.json());
+  },
+
+  testDbConnection(dbType) {
+    return authFetch(`${API_BASE}/api/db/test`, {
+      method: 'POST',
+      body: JSON.stringify({ dbType })
+    }).then(r => r.json());
+  },
+
+  switchDb(dbType) {
+    return authFetch(`${API_BASE}/api/db/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ dbType })
+    }).then(r => r.json());
+  },
+
+  exportDb() {
+    return authFetch(`${API_BASE}/api/db/export`).then(r => r.blob());
+  },
+
+  importDb(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = sessionStorage.getItem('auth_token');
+    return window.fetch(`${API_BASE}/api/db/import`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token
+      },
+      body: formData
+    }).then(r => r.json());
   }
 };

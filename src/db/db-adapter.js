@@ -1,0 +1,741 @@
+/**
+ * 多数据库适配器 - 统一接口
+ * 支持 SQLite, MySQL, PostgreSQL
+ */
+const initSqlJs = require('sql.js');
+const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const dbConfig = require('../config/db-config');
+
+// 数据库路径
+const isPkg = typeof process.pkg !== 'undefined';
+const baseDir = isPkg ? path.dirname(process.execPath) : path.resolve(__dirname, '../..');
+const SQLITE_PATH = path.join(baseDir, 'db', 'exam.db');
+
+// 当前数据库连接
+let currentDb = null;
+let currentDbType = null;
+
+// ==================== 辅助函数 ====================
+
+function hashPassword(password) {
+    if (!password) return '';
+    return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(inputPassword, storedPassword) {
+    if (!storedPassword) return !inputPassword;
+    if (storedPassword.length === 64 && /^[a-f0-9]+$/.test(storedPassword)) {
+        return hashPassword(inputPassword) === storedPassword;
+    }
+    return inputPassword === storedPassword;
+}
+
+function sanitizeUser(user) {
+    if (!user) return null;
+    const { password, ...safe } = user;
+    return safe;
+}
+
+function sanitizeUsers(users) {
+    return users.map(sanitizeUser);
+}
+
+// ==================== SQLite 实现 ====================
+
+const sqliteAdapter = {
+    db: null,
+
+    async init() {
+        const SQL = await initSqlJs();
+
+        // 确保目录存在
+        const dbDir = path.dirname(SQLITE_PATH);
+        if (!fs.existsSync(dbDir)) {
+            fs.mkdirSync(dbDir, { recursive: true });
+        }
+
+        if (fs.existsSync(SQLITE_PATH)) {
+            const buffer = fs.readFileSync(SQLITE_PATH);
+            this.db = new SQL.Database(buffer);
+        } else {
+            this.db = new SQL.Database();
+        }
+
+        await this.createTables();
+        console.log('SQLite 数据库初始化完成');
+        return this.db;
+    },
+
+    async createTables() {
+        const tables = `
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT DEFAULT 'student',
+                groupId TEXT
+            );
+            CREATE TABLE IF NOT EXISTS groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS questions (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                options TEXT,
+                answer TEXT NOT NULL,
+                category TEXT,
+                deviceType TEXT
+            );
+            CREATE TABLE IF NOT EXISTS papers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                questions TEXT,
+                rules TEXT,
+                createDate TEXT,
+                targetGroups TEXT,
+                targetUsers TEXT,
+                deadline TEXT
+            );
+            CREATE TABLE IF NOT EXISTS records (
+                id TEXT PRIMARY KEY,
+                paperId TEXT NOT NULL,
+                oderId TEXT NOT NULL,
+                score INTEGER,
+                totalTime INTEGER,
+                answers TEXT,
+                submitDate TEXT
+            );
+            CREATE TABLE IF NOT EXISTS push_logs (
+                id TEXT PRIMARY KEY,
+                paperId TEXT NOT NULL,
+                targetGroups TEXT,
+                targetUsers TEXT,
+                deadline TEXT,
+                pushDate TEXT
+            );
+            CREATE TABLE IF NOT EXISTS categories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                parentId TEXT
+            );
+        `;
+        this.db.run(tables);
+
+        // 确保有管理员账号
+        const admin = this.db.exec("SELECT * FROM users WHERE username = 'admin'");
+        if (!admin.length || !admin[0].values.length) {
+            const hashedPwd = hashPassword('admin123');
+            this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
+                ['admin-001', 'admin', hashedPwd, 'admin']);
+        }
+
+        this.save();
+    },
+
+    save() {
+        const data = this.db.export();
+        fs.writeFileSync(SQLITE_PATH, Buffer.from(data));
+    },
+
+    query(sql, params = []) {
+        try {
+            const stmt = this.db.prepare(sql);
+            stmt.bind(params);
+            const results = [];
+            while (stmt.step()) {
+                results.push(stmt.getAsObject());
+            }
+            stmt.free();
+            return results;
+        } catch (e) {
+            console.error('SQLite query error:', e.message);
+            return [];
+        }
+    },
+
+    run(sql, params = []) {
+        try {
+            this.db.run(sql, params);
+            this.save();
+        } catch (e) {
+            console.error('SQLite run error:', e.message);
+        }
+    },
+
+    async close() {
+        if (this.db) {
+            this.save();
+            this.db.close();
+            this.db = null;
+        }
+    },
+
+    // 导出数据库文件
+    exportDb() {
+        if (!this.db) return null;
+        return this.db.export();
+    },
+
+    // 导入数据库文件
+    async importDb(buffer) {
+        const SQL = await initSqlJs();
+        this.db = new SQL.Database(buffer);
+        this.save();
+        return true;
+    }
+};
+
+// ==================== MySQL 实现 ====================
+
+const mysqlAdapter = {
+    pool: null,
+
+    async init() {
+        const config = dbConfig.getDbConfig('mysql');
+        if (!config) throw new Error('MySQL 配置不存在');
+
+        this.pool = mysql.createPool({
+            host: config.host,
+            port: config.port,
+            user: config.user,
+            password: config.password,
+            database: config.database,
+            waitForConnections: true,
+            connectionLimit: 10
+        });
+
+        await this.createTables();
+        console.log('MySQL 数据库初始化完成');
+        return this.pool;
+    },
+
+    async createTables() {
+        const tables = [
+            `CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(255) PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'student',
+                groupId VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS \`groups\` (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL
+            )`,
+            `CREATE TABLE IF NOT EXISTS questions (
+                id VARCHAR(255) PRIMARY KEY,
+                type VARCHAR(50) NOT NULL,
+                content TEXT NOT NULL,
+                options TEXT,
+                answer TEXT NOT NULL,
+                category VARCHAR(255),
+                deviceType VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS papers (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                questions TEXT,
+                rules TEXT,
+                createDate VARCHAR(50),
+                targetGroups TEXT,
+                targetUsers TEXT,
+                deadline VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS records (
+                id VARCHAR(255) PRIMARY KEY,
+                paperId VARCHAR(255) NOT NULL,
+                userId VARCHAR(255) NOT NULL,
+                score INT,
+                totalTime INT,
+                answers TEXT,
+                submitDate VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS push_logs (
+                id VARCHAR(255) PRIMARY KEY,
+                paperId VARCHAR(255) NOT NULL,
+                targetGroups TEXT,
+                targetUsers TEXT,
+                deadline VARCHAR(50),
+                pushDate VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS categories (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                parentId VARCHAR(255)
+            )`
+        ];
+
+        for (const sql of tables) {
+            await this.pool.execute(sql);
+        }
+
+        // 确保有管理员账号
+        const [rows] = await this.pool.execute("SELECT * FROM users WHERE username = 'admin'");
+        if (rows.length === 0) {
+            const hashedPwd = hashPassword('admin123');
+            await this.pool.execute(
+                "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
+                ['admin-001', 'admin', hashedPwd, 'admin']
+            );
+        }
+    },
+
+    async query(sql, params = []) {
+        try {
+            const [rows] = await this.pool.execute(sql, params);
+            return rows;
+        } catch (e) {
+            console.error('MySQL query error:', e.message);
+            return [];
+        }
+    },
+
+    async run(sql, params = []) {
+        try {
+            await this.pool.execute(sql, params);
+        } catch (e) {
+            console.error('MySQL run error:', e.message);
+        }
+    },
+
+    async close() {
+        if (this.pool) {
+            await this.pool.end();
+            this.pool = null;
+        }
+    },
+
+    save() { /* MySQL 自动持久化 */ },
+    exportDb() { return null; },
+    async importDb() { return false; }
+};
+
+// ==================== PostgreSQL 实现 ====================
+
+const postgresAdapter = {
+    pool: null,
+
+    async init() {
+        const config = dbConfig.getDbConfig('postgres');
+        if (!config) throw new Error('PostgreSQL 配置不存在');
+
+        this.pool = new Pool({
+            host: config.host,
+            port: config.port,
+            user: config.user,
+            password: config.password,
+            database: config.database,
+            max: 10
+        });
+
+        await this.createTables();
+        console.log('PostgreSQL 数据库初始化完成');
+        return this.pool;
+    },
+
+    async createTables() {
+        const tables = [
+            `CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(255) PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'student',
+                "groupId" VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS groups (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL
+            )`,
+            `CREATE TABLE IF NOT EXISTS questions (
+                id VARCHAR(255) PRIMARY KEY,
+                type VARCHAR(50) NOT NULL,
+                content TEXT NOT NULL,
+                options TEXT,
+                answer TEXT NOT NULL,
+                category VARCHAR(255),
+                "deviceType" VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS papers (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                questions TEXT,
+                rules TEXT,
+                "createDate" VARCHAR(50),
+                "targetGroups" TEXT,
+                "targetUsers" TEXT,
+                deadline VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS records (
+                id VARCHAR(255) PRIMARY KEY,
+                "paperId" VARCHAR(255) NOT NULL,
+                "userId" VARCHAR(255) NOT NULL,
+                score INT,
+                "totalTime" INT,
+                answers TEXT,
+                "submitDate" VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS push_logs (
+                id VARCHAR(255) PRIMARY KEY,
+                "paperId" VARCHAR(255) NOT NULL,
+                "targetGroups" TEXT,
+                "targetUsers" TEXT,
+                deadline VARCHAR(50),
+                "pushDate" VARCHAR(50)
+            )`,
+            `CREATE TABLE IF NOT EXISTS categories (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                "parentId" VARCHAR(255)
+            )`
+        ];
+
+        for (const sql of tables) {
+            await this.pool.query(sql);
+        }
+
+        // 确保有管理员账号
+        const result = await this.pool.query("SELECT * FROM users WHERE username = 'admin'");
+        if (result.rows.length === 0) {
+            const hashedPwd = hashPassword('admin123');
+            await this.pool.query(
+                "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
+                ['admin-001', 'admin', hashedPwd, 'admin']
+            );
+        }
+    },
+
+    async query(sql, params = []) {
+        try {
+            // 将 ? 占位符转换为 $1, $2 格式
+            let pgSql = sql;
+            let idx = 0;
+            pgSql = pgSql.replace(/\?/g, () => `$${++idx}`);
+
+            const result = await this.pool.query(pgSql, params);
+            return result.rows;
+        } catch (e) {
+            console.error('PostgreSQL query error:', e.message);
+            return [];
+        }
+    },
+
+    async run(sql, params = []) {
+        try {
+            let pgSql = sql;
+            let idx = 0;
+            pgSql = pgSql.replace(/\?/g, () => `$${++idx}`);
+
+            await this.pool.query(pgSql, params);
+        } catch (e) {
+            console.error('PostgreSQL run error:', e.message);
+        }
+    },
+
+    async close() {
+        if (this.pool) {
+            await this.pool.end();
+            this.pool = null;
+        }
+    },
+
+    save() { /* PostgreSQL 自动持久化 */ },
+    exportDb() { return null; },
+    async importDb() { return false; }
+};
+
+// ==================== 统一接口 ====================
+
+function getAdapter(dbType) {
+    switch (dbType) {
+        case 'mysql': return mysqlAdapter;
+        case 'postgres': return postgresAdapter;
+        default: return sqliteAdapter;
+    }
+}
+
+async function initDatabase() {
+    const dbType = dbConfig.getActiveDb();
+    currentDbType = dbType;
+    currentDb = getAdapter(dbType);
+    await currentDb.init();
+    return currentDb;
+}
+
+async function switchDatabase(newDbType) {
+    // 关闭当前连接
+    if (currentDb) {
+        await currentDb.close();
+    }
+
+    // 更新配置
+    dbConfig.setActiveDb(newDbType);
+
+    // 初始化新数据库
+    currentDbType = newDbType;
+    currentDb = getAdapter(newDbType);
+    await currentDb.init();
+
+    return true;
+}
+
+async function testConnection(dbType, config) {
+    try {
+        if (dbType === 'mysql') {
+            const conn = await mysql.createConnection({
+                host: config.host,
+                port: config.port,
+                user: config.user,
+                password: config.password,
+                database: config.database
+            });
+            await conn.ping();
+            await conn.end();
+            return { success: true };
+        } else if (dbType === 'postgres') {
+            const pool = new Pool({
+                host: config.host,
+                port: config.port,
+                user: config.user,
+                password: config.password,
+                database: config.database,
+                max: 1
+            });
+            await pool.query('SELECT 1');
+            await pool.end();
+            return { success: true };
+        } else {
+            return { success: true };
+        }
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+// ==================== 业务方法（统一封装） ====================
+
+function saveDatabase() {
+    if (currentDb && currentDb.save) {
+        currentDb.save();
+    }
+}
+
+async function query(sql, params = []) {
+    if (!currentDb) throw new Error('数据库未初始化');
+    return await currentDb.query(sql, params);
+}
+
+async function run(sql, params = []) {
+    if (!currentDb) throw new Error('数据库未初始化');
+    await currentDb.run(sql, params);
+}
+
+// 导出模块
+module.exports = {
+    initDatabase,
+    switchDatabase,
+    testConnection,
+    saveDatabase,
+    getActiveDbType: () => currentDbType,
+
+    // SQLite 导入导出
+    exportSqliteDb: () => currentDbType === 'sqlite' ? sqliteAdapter.exportDb() : null,
+    importSqliteDb: async (buffer) => {
+        if (currentDbType !== 'sqlite') return false;
+        return await sqliteAdapter.importDb(buffer);
+    },
+
+    // ==================== 用户相关 ====================
+    getUsers: async () => sanitizeUsers(await query("SELECT * FROM users")),
+    getUserById: async (id) => {
+        const rows = await query("SELECT * FROM users WHERE id = ?", [id]);
+        return sanitizeUser(rows[0]);
+    },
+    getUserByUsername: async (username) => {
+        const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
+        return rows[0];
+    },
+    addUser: async (user) => {
+        const id = user.id || 'u_' + Date.now();
+        const hashedPwd = hashPassword(user.password);
+        await run("INSERT INTO users (id, username, password, role, groupId) VALUES (?, ?, ?, ?, ?)",
+            [id, user.username, hashedPwd, user.role || 'student', user.groupId || null]);
+        return { id, ...user, password: undefined };
+    },
+    deleteUser: async (id) => {
+        await run("DELETE FROM users WHERE id = ?", [id]);
+    },
+    updateUser: async (user) => {
+        if (user.password) {
+            const hashedPwd = hashPassword(user.password);
+            await run("UPDATE users SET username=?, password=?, role=?, groupId=? WHERE id=?",
+                [user.username, hashedPwd, user.role, user.groupId, user.id]);
+        } else {
+            await run("UPDATE users SET username=?, role=?, groupId=? WHERE id=?",
+                [user.username, user.role, user.groupId, user.id]);
+        }
+        return sanitizeUser(user);
+    },
+    login: async (username, password) => {
+        const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
+        if (rows.length === 0) return null;
+        const user = rows[0];
+        if (verifyPassword(password, user.password)) {
+            return sanitizeUser(user);
+        }
+        return null;
+    },
+
+    // ==================== 分组相关 ====================
+    getGroups: async () => await query("SELECT * FROM groups"),
+    addGroup: async (group) => {
+        const id = group.id || 'g_' + Date.now();
+        await run("INSERT INTO groups (id, name) VALUES (?, ?)", [id, group.name]);
+        return { id, ...group };
+    },
+    deleteGroup: async (id) => {
+        await run("DELETE FROM groups WHERE id = ?", [id]);
+    },
+
+    // ==================== 题目相关 ====================
+    getQuestions: async () => {
+        const rows = await query("SELECT * FROM questions");
+        return rows.map(q => ({
+            ...q,
+            options: q.options ? JSON.parse(q.options) : [],
+            answer: q.answer ? JSON.parse(q.answer) : ''
+        }));
+    },
+    addQuestion: async (q) => {
+        const id = q.id || 'q_' + Date.now();
+        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null]);
+        return { id, ...q };
+    },
+    updateQuestion: async (q) => {
+        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=? WHERE id=?",
+            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.id]);
+        return q;
+    },
+    deleteQuestion: async (id) => {
+        await run("DELETE FROM questions WHERE id = ?", [id]);
+    },
+    deleteAllQuestions: async () => {
+        await run("DELETE FROM questions");
+    },
+
+    // ==================== 试卷相关 ====================
+    getPapers: async () => {
+        const rows = await query("SELECT * FROM papers");
+        return rows.map(p => ({
+            ...p,
+            questions: p.questions ? JSON.parse(p.questions) : {},
+            rules: p.rules ? JSON.parse(p.rules) : [],
+            targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
+            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : []
+        }));
+    },
+    getPaperById: async (id) => {
+        const rows = await query("SELECT * FROM papers WHERE id = ?", [id]);
+        if (rows.length === 0) return null;
+        const p = rows[0];
+        return {
+            ...p,
+            questions: p.questions ? JSON.parse(p.questions) : {},
+            rules: p.rules ? JSON.parse(p.rules) : [],
+            targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
+            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : []
+        };
+    },
+    addPaper: async (paper) => {
+        const id = paper.id || 'p_' + Date.now();
+        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
+                paper.createDate || new Date().toISOString().split('T')[0],
+                JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []), paper.deadline || null]);
+        return { id, ...paper };
+    },
+    updatePaper: async (paper) => {
+        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=? WHERE id=?",
+            [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
+            JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []), paper.deadline || null, paper.id]);
+        return paper;
+    },
+    deletePaper: async (id) => {
+        await run("DELETE FROM papers WHERE id = ?", [id]);
+    },
+    deleteRecordsByPaper: async (paperId) => {
+        await run("DELETE FROM records WHERE paperId = ?", [paperId]);
+    },
+
+    // ==================== 记录相关 ====================
+    getRecords: async () => {
+        const rows = await query("SELECT * FROM records");
+        return rows.map(r => ({
+            ...r,
+            answers: r.answers ? JSON.parse(r.answers) : {}
+        }));
+    },
+    getRecordsByPaper: async (paperId) => {
+        const rows = await query("SELECT * FROM records WHERE paperId = ?", [paperId]);
+        return rows.map(r => ({
+            ...r,
+            answers: r.answers ? JSON.parse(r.answers) : {}
+        }));
+    },
+    addRecord: async (record) => {
+        const id = record.id || 'r_' + Date.now();
+        await run("INSERT INTO records (id, paperId, userId, score, totalTime, answers, submitDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [id, record.paperId, record.userId, record.score, record.totalTime,
+                JSON.stringify(record.answers || {}), new Date().toISOString()]);
+        return { id, ...record };
+    },
+    hasUserTakenExam: async (userId, paperId) => {
+        const rows = await query("SELECT id FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        return rows.length > 0;
+    },
+
+    // ==================== 推送记录相关 ====================
+    addPushLog: async (log) => {
+        const id = log.id || 'pl_' + Date.now();
+        await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?)",
+            [id, log.paperId, JSON.stringify(log.targetGroups || []), JSON.stringify(log.targetUsers || []),
+                log.deadline || null, new Date().toISOString()]);
+        return { id, ...log };
+    },
+    getPushLogsByPaper: async (paperId) => {
+        const rows = await query("SELECT * FROM push_logs WHERE paperId = ?", [paperId]);
+        return rows.map(l => ({
+            ...l,
+            targetGroups: l.targetGroups ? JSON.parse(l.targetGroups) : [],
+            targetUsers: l.targetUsers ? JSON.parse(l.targetUsers) : []
+        }));
+    },
+
+    // ==================== 专业分类相关 ====================
+    getCategories: async () => await query("SELECT * FROM categories"),
+    getMajors: async () => await query("SELECT * FROM categories WHERE type = 'major'"),
+    getDeviceTypes: async (majorId) => await query("SELECT * FROM categories WHERE type = 'device' AND parentId = ?", [majorId]),
+    addCategory: async (cat) => {
+        const id = cat.id || 'cat_' + Date.now();
+        await run("INSERT INTO categories (id, name, type, parentId) VALUES (?, ?, ?, ?)",
+            [id, cat.name, cat.type, cat.parentId || null]);
+        return { id, ...cat };
+    },
+    updateCategory: async (cat) => {
+        await run("UPDATE categories SET name=?, type=?, parentId=? WHERE id=?",
+            [cat.name, cat.type, cat.parentId || null, cat.id]);
+        return cat;
+    },
+    deleteCategory: async (id) => {
+        await run("DELETE FROM categories WHERE id = ? OR parentId = ?", [id, id]);
+    }
+};

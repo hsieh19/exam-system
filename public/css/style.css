@@ -1489,3 +1489,28 @@ a:hover {
 .btn-circle-xs.delete:hover {
   background: var(--danger);
 }
+
+/* 数据库配置显示 */
+.config-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.config-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.config-value {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
