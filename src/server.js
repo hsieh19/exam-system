@@ -129,6 +129,8 @@ async function startServer() {
     app.get('/api/users', adminMiddleware, async (req, res) => {
         const filter = {};
         if (req.user.role !== 'super_admin') {
+            // 如无分组ID，则不应看到任何用户（防止数据泄漏）
+            if (!req.user.groupId) return res.json([]);
             filter.groupId = req.user.groupId;
         }
         res.json(await db.getUsers(filter));
@@ -238,8 +240,13 @@ async function startServer() {
     app.get('/api/questions', adminMiddleware, async (req, res) => {
         const filter = {};
         if (req.user.role !== 'super_admin') {
-            filter.groupId = req.user.groupId;
-            filter.includePublic = true;
+            // 严格检查：如果有分组，只能看本组+公共；如果没有分组（异常情况），只能看公共
+            if (req.user.groupId) {
+                filter.groupId = req.user.groupId;
+                filter.includePublic = true;
+            } else {
+                filter.onlyPublic = true;
+            }
         }
         res.json(await db.getQuestions(filter));
     });
@@ -319,6 +326,8 @@ async function startServer() {
     app.get('/api/papers', adminMiddleware, async (req, res) => {
         const filter = {};
         if (req.user.role !== 'super_admin') {
+            // 如无分组ID，视为无权限查看试卷
+            if (!req.user.groupId) return res.json([]);
             filter.groupId = req.user.groupId;
         }
         res.json(await db.getPapers(filter));
