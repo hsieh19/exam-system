@@ -38,13 +38,16 @@ async function startServer() {
         next();
     };
 
-    // 管理员权限检查中间件
-    const adminMiddleware = (req, res, next) => {
-        if (!req.user || req.user.role !== 'admin') {
-            return res.status(403).json({ error: '需要管理员权限' });
+    // 权限检查中间件
+    const roleMiddleware = (allowedRoles) => (req, res, next) => {
+        if (!req.user || !allowedRoles.includes(req.user.role)) {
+            return res.status(403).json({ error: '权限不足' });
         }
         next();
     };
+
+    const adminMiddleware = roleMiddleware(['super_admin', 'group_admin']);
+    const superAdminMiddleware = roleMiddleware(['super_admin']);
 
     // 对 /api 下的所有请求应用鉴权（除了在中间件里排除的）
     app.use('/api', authMiddleware);
@@ -123,22 +126,72 @@ async function startServer() {
     });
 
     // ==================== 用户接口 ====================
-    app.get('/api/users', async (req, res) => {
-        res.json(await db.getUsers());
+    app.get('/api/users', adminMiddleware, async (req, res) => {
+        const filter = {};
+        if (req.user.role !== 'super_admin') {
+            filter.groupId = req.user.groupId;
+        }
+        res.json(await db.getUsers(filter));
     });
 
-    app.post('/api/users', async (req, res) => {
-        const user = { id: 'u_' + Date.now(), ...req.body };
+    app.post('/api/users', adminMiddleware, async (req, res) => {
+        const userData = req.body;
+        // 分组管理员只能创建本组成员且角色只能是学生
+        if (req.user.role !== 'super_admin') {
+            userData.role = 'student';
+            userData.groupId = req.user.groupId;
+        }
+        const user = { id: 'u_' + Date.now(), ...userData };
         res.json(await db.addUser(user));
     });
 
-    app.delete('/api/users/:id', async (req, res) => {
+    app.delete('/api/users/:id', adminMiddleware, async (req, res) => {
+        const targetUser = await db.getUserById(req.params.id);
+        if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+
+        // 权限检查：
+        // 1. 不能删除自己 (前端已做限制，后端兜底)
+        if (req.user.id === targetUser.id) {
+            return res.status(403).json({ error: '不能删除自己' });
+        }
+        // 2. 只有超管能删除超管
+        if (targetUser.role === 'super_admin' && req.user.role !== 'super_admin') {
+            return res.status(403).json({ error: '无权删除超级管理员' });
+        }
+        // 3. 非超管只能删除本组成员
+        if (req.user.role !== 'super_admin' && targetUser.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权操作该用户' });
+        }
+
         await db.deleteUser(req.params.id);
         res.json({ success: true });
     });
 
-    app.put('/api/users/:id', async (req, res) => {
-        const user = { ...req.body, id: req.params.id };
+    app.put('/api/users/:id', adminMiddleware, async (req, res) => {
+        const targetUser = await db.getUserById(req.params.id);
+        if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+
+        const updateData = req.body;
+        // 权限检查
+        if (req.user.role !== 'super_admin') {
+            // 不能修改超管
+            if (targetUser.role === 'super_admin') {
+                return res.status(403).json({ error: '无权操作超级管理员' });
+            }
+            if (targetUser.groupId !== req.user.groupId) {
+                return res.status(403).json({ error: '无权操作该用户' });
+            }
+            // 分组管理员不能修改角色和分组
+            delete updateData.role;
+            delete updateData.groupId;
+        }
+
+        // 核心保护：防止超管修改自己的角色导致权限丢失
+        if (req.user.id === targetUser.id) {
+            delete updateData.role;
+        }
+
+        const user = { ...updateData, id: req.params.id };
         res.json(await db.updateUser(user));
     });
 
@@ -171,37 +224,65 @@ async function startServer() {
         res.json(await db.getGroups());
     });
 
-    app.post('/api/groups', async (req, res) => {
+    app.post('/api/groups', superAdminMiddleware, async (req, res) => {
         const group = { id: 'g_' + Date.now(), ...req.body };
         res.json(await db.addGroup(group));
     });
 
-    app.delete('/api/groups/:id', async (req, res) => {
+    app.delete('/api/groups/:id', superAdminMiddleware, async (req, res) => {
         await db.deleteGroup(req.params.id);
         res.json({ success: true });
     });
 
     // ==================== 题目接口 ====================
-    app.get('/api/questions', async (req, res) => {
-        res.json(await db.getQuestions());
+    app.get('/api/questions', adminMiddleware, async (req, res) => {
+        const filter = {};
+        if (req.user.role !== 'super_admin') {
+            filter.groupId = req.user.groupId;
+            filter.includePublic = true;
+        }
+        res.json(await db.getQuestions(filter));
     });
 
-    app.post('/api/questions', async (req, res) => {
-        const question = { id: 'q_' + Date.now(), ...req.body };
+    app.post('/api/questions', adminMiddleware, async (req, res) => {
+        const questionData = req.body;
+        // 分组管理员只能创建本组题库
+        if (req.user.role !== 'super_admin') {
+            questionData.groupId = req.user.groupId;
+        }
+        const question = { id: 'q_' + Date.now(), ...questionData };
         res.json(await db.addQuestion(question));
     });
 
-    app.put('/api/questions/:id', async (req, res) => {
+    app.put('/api/questions/:id', adminMiddleware, async (req, res) => {
+        const existing = (await db.getQuestions()).find(q => q.id === req.params.id);
+        if (!existing) return res.status(404).json({ error: '题目不存在' });
+
+        // 权限检查
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权修改公共题库或其他分组题库' });
+        }
+
         const question = { ...req.body, id: req.params.id };
+        if (req.user.role !== 'super_admin') {
+            question.groupId = req.user.groupId; // 强制保持本组
+        }
         res.json(await db.updateQuestion(question));
     });
 
-    app.delete('/api/questions/all', async (req, res) => {
+    app.delete('/api/questions/all', superAdminMiddleware, async (req, res) => {
         await db.deleteAllQuestions();
         res.json({ success: true });
     });
 
-    app.delete('/api/questions/:id', async (req, res) => {
+    app.delete('/api/questions/:id', adminMiddleware, async (req, res) => {
+        const existing = (await db.getQuestions()).find(q => q.id === req.params.id);
+        if (!existing) return res.status(404).json({ error: '题目不存在' });
+
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权删除' });
+        }
+
         await db.deleteQuestion(req.params.id);
         res.json({ success: true });
     });
@@ -219,59 +300,92 @@ async function startServer() {
         res.json(await db.getDeviceTypes(req.params.majorId));
     });
 
-    app.post('/api/categories', async (req, res) => {
+    app.post('/api/categories', superAdminMiddleware, async (req, res) => {
         const cat = { id: 'cat_' + Date.now(), ...req.body };
         res.json(await db.addCategory(cat));
     });
 
-    app.put('/api/categories/:id', async (req, res) => {
+    app.put('/api/categories/:id', superAdminMiddleware, async (req, res) => {
         const cat = { ...req.body, id: req.params.id };
         res.json(await db.updateCategory(cat));
     });
 
-    app.delete('/api/categories/:id', async (req, res) => {
+    app.delete('/api/categories/:id', superAdminMiddleware, async (req, res) => {
         await db.deleteCategory(req.params.id);
         res.json({ success: true });
     });
 
     // ==================== 试卷接口 ====================
-    app.get('/api/papers', async (req, res) => {
-        res.json(await db.getPapers());
+    app.get('/api/papers', adminMiddleware, async (req, res) => {
+        const filter = {};
+        if (req.user.role !== 'super_admin') {
+            filter.groupId = req.user.groupId;
+        }
+        res.json(await db.getPapers(filter));
     });
 
-    app.get('/api/papers/:id', async (req, res) => {
+    app.get('/api/papers/:id', adminMiddleware, async (req, res) => {
         const paper = await db.getPaperById(req.params.id);
         if (paper) {
+            if (req.user.role !== 'super_admin' && paper.groupId !== req.user.groupId) {
+                return res.status(403).json({ error: '无权访问该试卷' });
+            }
             res.json(paper);
         } else {
             res.status(404).json({ error: '试卷不存在' });
         }
     });
 
-    app.post('/api/papers', async (req, res) => {
+    app.post('/api/papers', adminMiddleware, async (req, res) => {
         const paper = {
             id: 'p_' + Date.now(),
             createDate: new Date().toISOString().split('T')[0],
+            creatorId: req.user.id,
+            groupId: req.user.groupId,
             ...req.body
         };
+        // 分组管理员强制创建本组试卷
+        if (req.user.role !== 'super_admin') {
+            paper.groupId = req.user.groupId;
+        }
         res.json(await db.addPaper(paper));
     });
 
-    app.put('/api/papers/:id', async (req, res) => {
+    app.put('/api/papers/:id', adminMiddleware, async (req, res) => {
+        const existing = await db.getPaperById(req.params.id);
+        if (!existing) return res.status(404).json({ error: '试卷不存在' });
+
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权修改' });
+        }
+
         const paper = { ...req.body, id: req.params.id };
+        if (req.user.role !== 'super_admin') {
+            paper.groupId = req.user.groupId;
+        }
         res.json(await db.updatePaper(paper));
     });
 
-    app.put('/api/papers/:id/publish', async (req, res) => {
+    app.put('/api/papers/:id/publish', adminMiddleware, async (req, res) => {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: '试卷不存在' });
         }
 
-        const targetGroups = req.body.targetGroups || [];
+        // 权限检查
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权发布该试卷' });
+        }
+
+        let targetGroups = req.body.targetGroups || [];
         const targetUsers = req.body.targetUsers || [];
         const deadline = req.body.deadline;
         const pushTime = new Date().toISOString();
+
+        // 分组管理员只能推送到本组
+        if (req.user.role !== 'super_admin') {
+            targetGroups = [req.user.groupId];
+        }
 
         // 更新试卷的最新推送信息
         const paper = {
@@ -297,12 +411,26 @@ async function startServer() {
         res.json(paper);
     });
 
-    app.get('/api/papers/:id/push-logs', async (req, res) => {
+    app.get('/api/papers/:id/push-logs', adminMiddleware, async (req, res) => {
+        const existing = await db.getPaperById(req.params.id);
+        if (!existing) return res.status(404).json({ error: '试卷不存在' });
+
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权查看' });
+        }
+
         const logs = await db.getPushLogsByPaper(req.params.id);
         res.json(logs);
     });
 
-    app.delete('/api/papers/:id', async (req, res) => {
+    app.delete('/api/papers/:id', adminMiddleware, async (req, res) => {
+        const existing = await db.getPaperById(req.params.id);
+        if (!existing) return res.status(404).json({ error: '试卷不存在' });
+
+        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+            return res.status(403).json({ error: '无权删除' });
+        }
+
         await db.deletePaper(req.params.id);
         res.json({ success: true });
     });

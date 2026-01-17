@@ -8,11 +8,27 @@ document.addEventListener('DOMContentLoaded', async function () {
     if (user) {
         Auth.updateUserInfo();
         initNavigation();
+        checkPermissions();
         await refreshCache();
         loadGroups();
         loadUsers();
     }
 });
+
+function checkPermissions() {
+    const user = Storage.getCurrentUser();
+    if (user && user.role !== 'super_admin') {
+        // 隐藏数据库设置
+        const dbNavItem = document.querySelector('.nav-item[data-page="database"]');
+        if (dbNavItem) dbNavItem.style.display = 'none';
+
+        // 隐藏“设置专业”按钮
+        const categoryBtn = document.querySelector('button[onclick="showCategorySettings()"]');
+        if (categoryBtn) categoryBtn.style.display = 'none';
+
+        // 分组管理按钮逻辑在 loadGroups 处理
+    }
+}
 
 async function refreshCache() {
     cachedData.groups = await Storage.getGroups();
@@ -69,7 +85,17 @@ function closeModal() {
 
 // ========== 分组管理 ==========
 function loadGroups() {
-    const groups = cachedData.groups;
+    const user = Storage.getCurrentUser();
+    let groups = cachedData.groups;
+
+    // 分组管理员只能看自己组
+    if (user.role === 'group_admin') {
+        groups = groups.filter(g => g.id === user.groupId);
+        // 如果当前没有选中，自动选中自己组
+        if (!selectedGroupId && groups.length > 0) {
+            selectedGroupId = groups[0].id;
+        }
+    }
 
     // 渲染为列表形式以便选择
     const listHtml = `
@@ -78,11 +104,16 @@ function loadGroups() {
             ${groups.map(g => {
         const isActive = selectedGroupId === g.id;
         const activeStyle = isActive ? 'background-color: rgba(37, 99, 235, 0.1); border-left: 3px solid var(--primary);' : 'border-left: 3px solid transparent;';
+
+        // 只有超管可以删除分组
+        const deleteBtn = user.role === 'super_admin' ?
+            `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>` : '';
+
         return `
                 <div class="group-item" onclick="selectGroup('${g.id}')" 
                      style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle}">
                     <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}">${escapeHtml(g.name)}</span>
-                    <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>
+                    ${deleteBtn}
                 </div>
                 `;
     }).join('')}
@@ -90,6 +121,10 @@ function loadGroups() {
     `;
 
     document.getElementById('groups-list').innerHTML = listHtml;
+
+    // 只有超管可以添加分组
+    const addGroupBtn = document.querySelector('button[onclick="showAddGroup()"]');
+    if (addGroupBtn) addGroupBtn.style.display = user.role === 'super_admin' ? 'block' : 'none';
 }
 
 function selectGroup(id) {
@@ -140,6 +175,7 @@ function renderUsers() {
     let users = cachedData.users;
     const query = document.getElementById('user-search-input')?.value.trim().toLowerCase();
     const groups = cachedData.groups;
+    const currentUser = Storage.getCurrentUser();
     const getGroupName = (gid) => groups.find(g => g.id === gid)?.name || '-';
 
     // 优先处理搜索（全局搜索），若无搜索词则按分组过滤
@@ -152,77 +188,102 @@ function renderUsers() {
         users = users.filter(u => u.groupId === selectedGroupId);
     }
 
-    const html = users.length ? `<table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th style="text-align:center;width:280px;">操作</th></tr></thead>
+    const html = users.length ? `<table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th style="text-align:center;width:340px;">操作</th></tr></thead>
     <tbody>${users.map(u => {
-        const isAdmin = u.role === 'admin';
-        const nameStyle = isAdmin ? 'color: #2563eb; font-weight: bold;' : '';
-        const adminBtnClass = isAdmin ? 'btn-primary' : 'btn-secondary';
-        const adminBtnText = isAdmin ? '取消管理' : '设为管理';
-        const mySelf = Storage.getCurrentUser();
-        // 如果是自己，禁用删除和取消管理，或者只禁用删除？通常不建议删自己。
-        const isSelf = mySelf && mySelf.id === u.id;
+        const isSuper = u.role === 'super_admin';
+        const isGroupAdmin = u.role === 'group_admin';
+        const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
+
+        const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
+            isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
+
+        const isSelf = currentUser && currentUser.id === u.id;
+
+        // 权限判断
+        const canManageRole = currentUser.role === 'super_admin' && !isSelf;
+        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
+        const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
 
         return `<tr>
         <td style="${nameStyle}">
             ${escapeHtml(u.username)} 
-            ${isAdmin ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">ADMIN</span>' : ''}
+            ${roleBadge}
         </td>
         <td>${escapeHtml(getGroupName(u.groupId))}</td>
         <td style="text-align:center;">
-          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:nowrap;">
-            <button class="btn btn-sm ${adminBtnClass}" onclick="toggleAdmin('${u.id}')" style="white-space:nowrap;">${adminBtnText}</button>
-            <button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')" style="white-space:nowrap;">编辑</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')" ${isSelf ? 'disabled title="不能删除自己"' : ''} style="white-space:nowrap;">删除</button>
+          <div style="display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+            ${canManageRole ? `
+                <button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>
+                <button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>
+            ` : ''}
+            ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>` : ''}
+            ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>` : ''}
           </div>
         </td></tr>`;
     }).join('')}</tbody></table>` : '<p class="text-muted">暂无用户</p>';
     document.getElementById('users-list').innerHTML = html;
 }
 
-async function toggleAdmin(id) {
+async function toggleUserRole(id, targetRole) {
     const user = cachedData.users.find(u => u.id === id);
     if (!user) return;
 
-    const mySelf = Storage.getCurrentUser();
-    if (mySelf && mySelf.id === user.id && user.role === 'admin') {
-        showAlert('无法取消自己的管理员权限');
+    // 如果已经是该角色，则取消（变回 student），否则设为该角色
+    const newRole = user.role === targetRole ? 'student' : targetRole;
+
+    // 二次确认，针对提权操作
+    if (newRole === 'super_admin') {
+        showConfirmModal({
+            title: '设为超级管理员',
+            message: `确定要将用户 <strong>${escapeHtml(user.username)}</strong> 设置为超级管理员吗？<br><br><span style="color:var(--danger);">超级管理员拥有系统的所有权限，包括管理其他管理员！</span>`,
+            confirmText: '确认提权',
+            confirmType: 'danger',
+            isHtml: true,
+            onConfirm: async () => {
+                await executeToggleRole(user, newRole);
+            }
+        });
         return;
     }
 
-    const newRole = user.role === 'admin' ? 'student' : 'admin';
-    const action = newRole === 'admin' ? '设为管理员' : '取消管理员';
-
-    // 无需弹窗确认，直接切换，体验更丝滑（因为有按钮颜色反馈）
-    // 但用户描述“再次点击即可取消”，有点开关的意思。为了安全还是弹个窗？
-    // 用户没明确说要确认。但为了防止误点，还是加个简单的 confirm 比较好，或者不加。
-    // 很多后台系统设为管理员是敏感操作。
-    // 但是为了满足用户“点击可将...再次点击即可取消”的流畅描述，我决定不加 confirm，因为按钮状态很明显。
-    // 或者加一个轻量级的。
-
-    await Storage.updateUser({ ...user, role: newRole });
-    await refreshCache(); // 属性变了，刷新缓存
-    loadUsers(); // 重新渲染
+    await executeToggleRole(user, newRole);
 }
 
+async function executeToggleRole(user, newRole) {
+    await Storage.updateUser({ ...user, role: newRole });
+    await refreshCache();
+    loadUsers();
+}
+
+
 function showAddUser() {
+    const currentUser = Storage.getCurrentUser();
     // 强制先选择分组
     if (!selectedGroupId) {
         showAlert('请先从左侧选择一个分组');
         return;
     }
 
-    editingUserId = null; // 重置为新增模式
+    editingUserId = null;
     const groups = cachedData.groups;
 
-    // 生成选项，当前选中的分组被选中且disabled（为了视觉和逻辑一致性），或者只是选中
-    // 如果用户允许改动，那么加完了列表里就不见了，会很奇怪。所以最好绑定。
     const groupOptions = groups.map(g =>
         `<option value="${g.id}" ${g.id === selectedGroupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
     ).join('');
 
+    const roleOptions = `
+        <option value="student" selected>考生</option>
+        ${currentUser.role === 'super_admin' ? '<option value="group_admin">分组管理员</option>' : ''}
+    `;
+
     openModal('添加用户',
         `<div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name"></div>
          <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" value="123456"></div>
+         <div class="form-group"><label class="form-label">角色</label>
+            <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                ${roleOptions}
+            </select>
+         </div>
          <div class="form-group"><label class="form-label">分组</label>
             <select class="form-select" id="user-group" disabled style="background-color: var(--bg-light); opacity: 0.7;">
                 ${groupOptions}
@@ -237,11 +298,24 @@ function showEditUser(id) {
     const user = cachedData.users.find(u => u.id === id);
     if (!user) return;
 
+    const currentUser = Storage.getCurrentUser();
     const groups = cachedData.groups;
+
+    const roleOptions = `
+        <option value="student" ${user.role === 'student' ? 'selected' : ''}>考生</option>
+        <option value="group_admin" ${user.role === 'group_admin' ? 'selected' : ''}>分组管理员</option>
+        ${user.role === 'super_admin' ? '<option value="super_admin" selected>超级管理员</option>' : ''}
+    `;
+
     openModal('编辑用户',
         `<div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name" value="${escapeHtml(user.username)}"></div>
          <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" placeholder="留空则不修改密码"></div>
-         <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group">
+         <div class="form-group"><label class="form-label">角色</label>
+            <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                ${roleOptions}
+            </select>
+         </div>
+         <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
            <option value="">未分组</option>
            ${groups.map(g => `<option value="${g.id}" ${g.id === user.groupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}</select></div>`,
         '<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveUser()">更新</button>');
@@ -250,6 +324,7 @@ function showEditUser(id) {
 async function saveUser() {
     const username = document.getElementById('user-name').value.trim();
     const password = document.getElementById('user-pwd').value;
+    const role = document.getElementById('user-role')?.value || 'student';
     const groupId = document.getElementById('user-group').value;
 
     if (!username) { showAlert('请输入用户名'); return; }
@@ -258,13 +333,13 @@ async function saveUser() {
         // 编辑模式
         const oldUser = cachedData.users.find(u => u.id === editingUserId);
         if (oldUser) {
-            const updateData = { ...oldUser, username, groupId };
+            const updateData = { ...oldUser, username, role, groupId };
             if (password) updateData.password = password; // 只有输入了密码才更新
             await Storage.updateUser(updateData);
         }
     } else {
         // 新增模式
-        await Storage.addUser({ username, password: password || '123456', role: 'student', groupId });
+        await Storage.addUser({ username, password: password || '123456', role, groupId });
     }
 
     closeModal();
@@ -278,6 +353,11 @@ async function saveUser() {
 let selectedMajorId = null;
 
 function showCategorySettings() {
+    const user = Storage.getCurrentUser();
+    if (user && user.role !== 'super_admin') {
+        showAlert('权限不足，只有超级管理员可以设置专业');
+        return;
+    }
     const majors = cachedData.categories.filter(c => c.type === 'major');
 
     // 如果没有选中的专业，默认选中第一个
@@ -494,30 +574,69 @@ async function addDeviceType() {
     document.getElementById('devices-panel').innerHTML = renderDevicesPanel();
 }
 
+async function deleteMajor(id) {
+    showConfirmModal({
+        title: '删除专业',
+        message: '确定要删除该专业吗？<br>删除后，该专业下的所有设备类型也将被删除。',
+        confirmText: '删除',
+        confirmType: 'danger',
+        isHtml: true,
+        onConfirm: async () => {
+            await Storage.deleteCategory(id);
+            await refreshCache();
+            if (selectedMajorId === id) selectedMajorId = null;
+            showCategorySettings();
+        }
+    });
+}
+
+async function deleteDevice(id) {
+    showConfirmModal({
+        title: '删除设备类型',
+        message: '确定要删除该设备类型吗？',
+        confirmText: '删除',
+        confirmType: 'danger',
+        onConfirm: async () => {
+            await Storage.deleteCategory(id);
+            await refreshCache();
+            document.getElementById('devices-panel').innerHTML = renderDevicesPanel();
+        }
+    });
+}
+
 // ========== 题库管理 ==========
 let currentQuestionFilters = ['single', 'multiple', 'judge'];
 
 function loadQuestions() {
     let questions = cachedData.questions;
+    const currentUser = Storage.getCurrentUser();
+
     // 过滤出选中的题型
     questions = questions.filter(q => currentQuestionFilters.includes(q.type));
 
     const typeMap = { single: '单选题', multiple: '多选题', judge: '判断题' };
     const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
     const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
+    const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
 
     const html = questions.length ? `<div class="table-container"><table class="data-table">
-    <thead><tr><th>专业</th><th>设备类型</th><th>题目</th><th>类型</th><th>操作</th></tr></thead>
-    <tbody>${questions.map(q => `<tr>
+    <thead><tr><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>操作</th></tr></thead>
+    <tbody>${questions.map(q => {
+        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && q.groupId === currentUser.groupId);
+        const canDelete = canEdit;
+
+        return `<tr>
       <td>${escapeHtml(getMajorName(q.category))}</td>
       <td>${escapeHtml(getDeviceName(q.deviceType) || '-')}</td>
-      <td style="max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
+      <td><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
       <td><span class="badge badge-primary">${typeMap[q.type]}</span></td>
       <td>
-        <button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteQuestion('${q.id}')">删除</button>
+        ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>` : ''}
+        ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteQuestion('${q.id}')">删除</button>` : ''}
       </td>
-    </tr>`).join('')}</tbody></table></div>` : `<p class="text-muted">所选题型中暂无题目</p>`;
+    </tr>`;
+    }).join('')}</tbody></table></div>` : `<p class="text-muted">所选题型中暂无题目</p>`;
     document.getElementById('questions-list').innerHTML = html;
 }
 
@@ -556,8 +675,9 @@ function showQuestionEditor(type) {
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
     const majors = cachedData.categories.filter(c => c.type === 'major');
     const devices = cachedData.categories.filter(c => c.type === 'device');
+    const currentUser = Storage.getCurrentUser();
 
-    const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A' };
+    const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A', groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null };
 
     // 找到当前专业对应的设备类型
     const currentMajorId = q.category || '';
@@ -587,6 +707,11 @@ function showQuestionEditor(type) {
         <input type="text" class="form-input" id="q-answer" value="${Array.isArray(q.answer) ? q.answer.join(',') : q.answer}" placeholder="${type === 'multiple' ? '如：A,C' : '如：A'}"></div>`;
     }
 
+    const groupOptions = `
+        <option value="" ${!q.groupId ? 'selected' : ''}>公共题库</option>
+        ${cachedData.groups.map(g => `<option value="${g.id}" ${q.groupId === g.id ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}
+    `;
+
     const editorInnerHtml = `
       <div style="display:flex;gap:16px;margin-bottom:16px;">
         <div class="form-group" style="flex:1;margin-bottom:0;">
@@ -603,6 +728,12 @@ function showQuestionEditor(type) {
             ${currentDevices.map(d => `<option value="${d.id}" ${d.id === q.deviceType ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
           </select>
         </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">题库归属</label>
+        <select class="form-select" id="q-groupId" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+            ${groupOptions}
+        </select>
       </div>
       <div class="form-group"><label class="form-label">题目</label>
         <textarea class="form-input" id="q-content" rows="3" placeholder="请输入题目内容">${q.content}</textarea></div>
@@ -680,6 +811,7 @@ async function saveQuestion(type) {
     try {
         const categoryEl = document.getElementById('q-category');
         const deviceTypeEl = document.getElementById('q-deviceType');
+        const groupIdEl = document.getElementById('q-groupId');
         const contentEl = document.getElementById('q-content');
         const answerEl = document.getElementById('q-answer');
 
@@ -691,6 +823,7 @@ async function saveQuestion(type) {
 
         const category = categoryEl.value;
         const deviceType = deviceTypeEl ? deviceTypeEl.value : '';
+        const groupId = groupIdEl ? groupIdEl.value : null;
         const content = contentEl.value.trim();
         let options = [], answer;
 
@@ -748,7 +881,7 @@ async function saveQuestion(type) {
             btn.disabled = true;
         }
 
-        const question = { type, category, deviceType, content, options, answer };
+        const question = { type, category, deviceType, content, options, answer, groupId: groupId || null };
         if (editingQuestion) {
             await Storage.updateQuestion({ ...question, id: editingQuestion.id });
         } else {
@@ -789,14 +922,27 @@ function loadPaperGroups() { }
 
 function loadPapers() {
     const papers = cachedData.papers;
-    const groups = cachedData.groups;
-    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>创建日期</th><th>推送记录</th><th>操作</th></tr></thead>
-    <tbody>${papers.map(p => `<tr><td>${escapeHtml(p.name)}</td><td>${p.createDate || '-'}</td>
-      <td><button class="btn btn-sm btn-secondary" onclick="showPushLogs('${p.id}')">查看记录</button></td>
+    const currentUser = Storage.getCurrentUser();
+    const getGroupName = (id) => cachedData.groups.find(g => g.id === id)?.name || '公共/全员';
+
+    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>归属分组</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>${papers.map(p => {
+        const canManage = currentUser.role === 'super_admin' || p.groupId === currentUser.groupId;
+        return `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      <td>${escapeHtml(getGroupName(p.groupId))}</td>
+      <td>${p.createDate || '-'}</td>
+      <td><span class="badge ${p.published ? 'badge-success' : 'badge-warning'}">${p.published ? '已发布' : '草稿'}</span></td>
       <td>
-        <button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>
-        <button class="btn btn-sm btn-danger" onclick="deletePaper('${p.id}')">删除</button>
-      </td></tr>`).join('')}</tbody></table>` : '<p class="text-muted">暂无试卷</p>';
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="showPushLogs('${p.id}')">推送记录</button>
+            ${canManage ? `
+                <button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>
+                <button class="btn btn-sm btn-danger" onclick="deletePaper('${p.id}')">删除</button>
+            ` : ''}
+        </div>
+      </td></tr>`;
+    }).join('')}</tbody></table>` : '<p class="text-muted">暂无试卷</p>';
     document.getElementById('papers-list').innerHTML = html;
 }
 
@@ -1146,8 +1292,15 @@ async function publishPaper(paperId) {
 
 function showPublishModal(paperId) {
     const paper = cachedData.papers.find(p => p.id === paperId);
-    const groups = cachedData.groups;
-    const users = cachedData.users.filter(u => u.role === 'student');
+    let groups = cachedData.groups;
+    let users = cachedData.users.filter(u => u.role === 'student');
+    const currentUser = Storage.getCurrentUser();
+
+    // 如果是分组管理员，只能推送给自己组
+    if (currentUser.role === 'group_admin') {
+        groups = groups.filter(g => g.id === currentUser.groupId);
+        users = users.filter(u => u.groupId === currentUser.groupId);
+    }
 
     // 预填充已选分组和截止时间
     const currentGroups = paper?.targetGroups || [];
@@ -1431,7 +1584,8 @@ async function importQuestions(input) {
                         deviceType: deviceTypeId,
                         content: String(content).trim(),
                         options: options,
-                        answer: answer
+                        answer: answer,
+                        groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null
                     });
                 }
             }
@@ -1460,15 +1614,19 @@ async function importQuestions(input) {
 }
 
 function handleImportClick() {
+    const user = Storage.getCurrentUser();
+    const isSuper = user.role === 'super_admin';
+
     showConfirmModal({
         title: '导入提醒',
-        message: '导入操作会<span style="color:var(--danger);font-weight:bold;">清空现有数据</span>，强烈建议您在操作前先导出题库进行备份。是否确认为继续导入？',
-        confirmText: '继续导入',
-        confirmType: 'danger',
+        message: isSuper
+            ? '导入操作会<span style="color:var(--danger);font-weight:bold;">彻底清空所有</span>现有题库数据（包括各分组题库），强烈建议您在操作前先导出题库进行备份。是否确认为继续导入？'
+            : '导入操作会将题目直接<span style="color:var(--primary);font-weight:bold;">追加到您的机房题库</span>中。确认是否继续导入？',
+        confirmText: isSuper ? '继续清空导入' : '继续追加导入',
+        confirmType: isSuper ? 'danger' : 'primary',
         isHtml: true,
         onConfirm: async () => {
             closeModal();
-            // 在模态框关闭后稍微延迟，以防焦点冲突
             setTimeout(() => {
                 document.getElementById('file-import').click();
             }, 200);
@@ -1664,11 +1822,25 @@ async function deleteGroup(id) {
 
 // 替换 deleteUser
 async function deleteUser(id) {
+    const user = cachedData.users.find(u => u.id === id);
+    if (!user) return;
+
+    let message = `确定要删除用户 <strong>${escapeHtml(user.username)}</strong> 吗？`;
+
+    // 如果是管理员，增加严重警告
+    if (user.role === 'super_admin' || user.role === 'group_admin') {
+        const roleName = user.role === 'super_admin' ? '超级管理员' : '分组管理员';
+        message += `<br><br><span style="color:var(--danger);font-weight:bold;">警告：该用户是${roleName}！</span><br>删除后将无法恢复，且可能影响系统管理功能。`;
+    } else {
+        message += '<br>删除后无法恢复。';
+    }
+
     showConfirmModal({
         title: '删除用户',
-        message: '确定删除此用户？',
+        message: message,
         confirmText: '确定删除',
         confirmType: 'danger',
+        isHtml: true,
         onConfirm: async () => {
             await Storage.deleteUser(id);
             await refreshCache();
@@ -1709,23 +1881,29 @@ async function deletePaper(id) {
 
 // 替换 importQuestions 中的 confirm
 function confirmImportQuestions(newQuestions) {
+    const user = Storage.getCurrentUser();
+    const isSuper = user.role === 'super_admin';
+
     showConfirmModal({
         title: '确认导入',
-        message: `解析成功，共${newQuestions.length}道题。<br>确认导入吗？这将<span style="color:var(--danger);font-weight:bold;">彻底清空</span>现有题库。`,
-        confirmText: '确认清空并导入',
-        confirmType: 'danger',
+        message: `解析成功，共${newQuestions.length}道题。<br>确认导入吗？${isSuper ? '这将<span style="color:var(--danger);font-weight:bold;">彻底清空所有</span>现有题库。' : '题目将追加到您的机房题库中。'}`,
+        confirmText: isSuper ? '确认清空并导入' : '确认导入',
+        confirmType: isSuper ? 'danger' : 'primary',
         isHtml: true,
         onConfirm: async () => {
-            // 批量导入逻辑
             try {
-                // 1. 先清空
-                await Storage.deleteAllQuestions();
-                // 2. 再添加
+                // 1. 如果是超管且确认清空
+                if (isSuper) {
+                    await Storage.deleteAllQuestions();
+                }
+
+                // 2. 添加
+                // 批量添加，为了防止并发过大，可以分批或者串行
+                // 这里暂时保持 Promise.all
                 await Promise.all(newQuestions.map(q => Storage.addQuestion(q)));
 
-                showAlert(`已清空旧数据并成功导入 ${newQuestions.length} 道题目`);
+                showAlert(isSuper ? `已清空旧数据并成功导入 ${newQuestions.length} 道题目` : `成功追加导入 ${newQuestions.length} 道题目`);
                 closeModal();
-                // 重新加载题目列表
                 await refreshCache();
                 loadQuestions();
             } catch (err) {

@@ -16,7 +16,7 @@ const Auth = {
     // 检查是否是管理员
     checkAdmin() {
         const user = this.checkAuth();
-        if (user && user.role !== 'admin') {
+        if (user && user.role !== 'super_admin' && user.role !== 'group_admin') {
             window.location.href = 'student.html';
             return null;
         }
@@ -26,7 +26,7 @@ const Auth = {
     // 检查是否是考生
     checkStudent() {
         const user = this.checkAuth();
-        if (user && user.role !== 'student') {
+        if (user && (user.role === 'super_admin' || user.role === 'group_admin')) {
             window.location.href = 'admin.html';
             return null;
         }
@@ -38,7 +38,7 @@ const Auth = {
         const user = await Storage.login(username, password);
         if (user) {
             // 根据角色跳转
-            if (user.role === 'admin') {
+            if (user.role === 'super_admin' || user.role === 'group_admin') {
                 window.location.href = 'admin.html';
             } else {
                 window.location.href = 'student.html';
@@ -61,7 +61,9 @@ const Auth = {
         if (!container || !user) return;
 
         const avatar = user.username.charAt(0).toUpperCase();
-        const roleText = user.role === 'admin' ? '管理员' : '考生';
+        let roleText = '考生';
+        if (user.role === 'super_admin') roleText = '超级管理员';
+        else if (user.role === 'group_admin') roleText = '分组管理员';
 
         container.innerHTML = `
       <div class="user-avatar">${avatar}</div>

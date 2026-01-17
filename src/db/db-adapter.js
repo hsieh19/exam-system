@@ -90,7 +90,8 @@ const sqliteAdapter = {
                 options TEXT,
                 answer TEXT NOT NULL,
                 category TEXT,
-                deviceType TEXT
+                deviceType TEXT,
+                groupId TEXT
             );
             CREATE TABLE IF NOT EXISTS papers (
                 id TEXT PRIMARY KEY,
@@ -100,12 +101,14 @@ const sqliteAdapter = {
                 createDate TEXT,
                 targetGroups TEXT,
                 targetUsers TEXT,
-                deadline TEXT
+                deadline TEXT,
+                groupId TEXT,
+                creatorId TEXT
             );
             CREATE TABLE IF NOT EXISTS records (
                 id TEXT PRIMARY KEY,
                 paperId TEXT NOT NULL,
-                oderId TEXT NOT NULL,
+                userId TEXT NOT NULL,
                 score INTEGER,
                 totalTime INTEGER,
                 answers TEXT,
@@ -133,7 +136,7 @@ const sqliteAdapter = {
         if (!admin.length || !admin[0].values.length) {
             const hashedPwd = hashPassword('admin123');
             this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', 'admin', hashedPwd, 'admin']);
+                ['admin-001', 'admin', hashedPwd, 'super_admin']);
         }
 
         this.save();
@@ -236,7 +239,8 @@ const mysqlAdapter = {
                 options TEXT,
                 answer TEXT NOT NULL,
                 category VARCHAR(255),
-                deviceType VARCHAR(255)
+                deviceType VARCHAR(255),
+                groupId VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
@@ -246,7 +250,9 @@ const mysqlAdapter = {
                 createDate VARCHAR(50),
                 targetGroups TEXT,
                 targetUsers TEXT,
-                deadline VARCHAR(50)
+                deadline VARCHAR(50),
+                groupId VARCHAR(255),
+                creatorId VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -283,7 +289,7 @@ const mysqlAdapter = {
             const hashedPwd = hashPassword('admin123');
             await this.pool.execute(
                 "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', 'admin', hashedPwd, 'admin']
+                ['admin-001', 'admin', hashedPwd, 'super_admin']
             );
         }
     },
@@ -348,7 +354,7 @@ const postgresAdapter = {
                 username VARCHAR(255) UNIQUE NOT NULL,
                 password VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'student',
-                "groupId" VARCHAR(255)
+                groupId VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS groups (
                 id VARCHAR(255) PRIMARY KEY,
@@ -361,7 +367,8 @@ const postgresAdapter = {
                 options TEXT,
                 answer TEXT NOT NULL,
                 category VARCHAR(255),
-                "deviceType" VARCHAR(255)
+                "deviceType" VARCHAR(255),
+                "groupId" VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
@@ -371,7 +378,9 @@ const postgresAdapter = {
                 "createDate" VARCHAR(50),
                 "targetGroups" TEXT,
                 "targetUsers" TEXT,
-                deadline VARCHAR(50)
+                deadline VARCHAR(50),
+                "groupId" VARCHAR(255),
+                "creatorId" VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -408,7 +417,7 @@ const postgresAdapter = {
             const hashedPwd = hashPassword('admin123');
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
-                ['admin-001', 'admin', hashedPwd, 'admin']
+                ['admin-001', 'admin', hashedPwd, 'super_admin']
             );
         }
     },
@@ -554,7 +563,22 @@ module.exports = {
     },
 
     // ==================== 用户相关 ====================
-    getUsers: async () => sanitizeUsers(await query("SELECT * FROM users")),
+    getUsers: async (filter = {}) => {
+        let sql = "SELECT * FROM users";
+        const params = [];
+        const conditions = [];
+
+        if (filter.groupId !== undefined) {
+            conditions.push("groupId = ?");
+            params.push(filter.groupId);
+        }
+
+        if (conditions.length > 0) {
+            sql += " WHERE " + conditions.join(" AND ");
+        }
+
+        return sanitizeUsers(await query(sql, params));
+    },
     getUserById: async (id) => {
         const rows = await query("SELECT * FROM users WHERE id = ?", [id]);
         return sanitizeUser(rows[0]);
@@ -606,8 +630,27 @@ module.exports = {
     },
 
     // ==================== 题目相关 ====================
-    getQuestions: async () => {
-        const rows = await query("SELECT * FROM questions");
+    getQuestions: async (filter = {}) => {
+        let sql = "SELECT * FROM questions";
+        const params = [];
+        const conditions = [];
+
+        if (filter.groupId !== undefined) {
+            if (filter.includePublic) {
+                conditions.push("(groupId = ? OR groupId IS NULL)");
+            } else {
+                conditions.push("groupId = ?");
+            }
+            params.push(filter.groupId);
+        } else if (filter.onlyPublic) {
+            conditions.push("groupId IS NULL");
+        }
+
+        if (conditions.length > 0) {
+            sql += " WHERE " + conditions.join(" AND ");
+        }
+
+        const rows = await query(sql, params);
         return rows.map(q => ({
             ...q,
             options: q.options ? JSON.parse(q.options) : [],
@@ -616,13 +659,13 @@ module.exports = {
     },
     addQuestion: async (q) => {
         const id = q.id || 'q_' + Date.now();
-        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null]);
+        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null]);
         return { id, ...q };
     },
     updateQuestion: async (q) => {
-        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=? WHERE id=?",
-            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.id]);
+        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=? WHERE id=?",
+            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.id]);
         return q;
     },
     deleteQuestion: async (id) => {
@@ -633,8 +676,21 @@ module.exports = {
     },
 
     // ==================== 试卷相关 ====================
-    getPapers: async () => {
-        const rows = await query("SELECT * FROM papers");
+    getPapers: async (filter = {}) => {
+        let sql = "SELECT * FROM papers";
+        const params = [];
+        const conditions = [];
+
+        if (filter.groupId !== undefined) {
+            conditions.push("groupId = ?");
+            params.push(filter.groupId);
+        }
+
+        if (conditions.length > 0) {
+            sql += " WHERE " + conditions.join(" AND ");
+        }
+
+        const rows = await query(sql, params);
         return rows.map(p => ({
             ...p,
             questions: p.questions ? JSON.parse(p.questions) : {},
@@ -657,16 +713,18 @@ module.exports = {
     },
     addPaper: async (paper) => {
         const id = paper.id || 'p_' + Date.now();
-        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline, groupId, creatorId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
                 paper.createDate || new Date().toISOString().split('T')[0],
-                JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []), paper.deadline || null]);
+                JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
+                paper.deadline || null, paper.groupId || null, paper.creatorId || null]);
         return { id, ...paper };
     },
     updatePaper: async (paper) => {
-        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=? WHERE id=?",
+        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=?, groupId=?, creatorId=? WHERE id=?",
             [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
-            JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []), paper.deadline || null, paper.id]);
+            JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
+            paper.deadline || null, paper.groupId || null, paper.creatorId || null, paper.id]);
         return paper;
     },
     deletePaper: async (id) => {
