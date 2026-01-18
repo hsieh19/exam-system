@@ -131,20 +131,20 @@ a:hover {
    表单元素
    =========================== */
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .form-label {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .form-input {
   width: 100%;
-  padding: 12px 16px;
+  padding: 10px 14px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -426,7 +426,7 @@ a:hover {
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card-header {
@@ -435,6 +435,8 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .card-title {
@@ -445,6 +447,8 @@ a:hover {
 
 .card-body {
   padding: 24px;
+  background: var(--bg-card);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 /* ===========================
@@ -827,7 +831,7 @@ a:hover {
 }
 
 .modal-header {
-  padding: 24px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -859,11 +863,11 @@ a:hover {
 }
 
 .modal-body {
-  padding: 24px;
+  padding: 16px 20px;
 }
 
 .modal-footer {
-  padding: 16px 24px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
@@ -1513,4 +1517,25 @@ a:hover {
   color: var(--text-primary);
   font-weight: 500;
   font-family: 'Consolas', 'Monaco', monospace;
+}
+
+/* ===========================
+   下拉筛选菜单
+   =========================== */
+.dropdown-item {
+  color: var(--text-primary);
+}
+
+.dropdown-item:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.dropdown-item.active {
+  background: var(--primary);
+  color: white;
+}
+
+.dropdown-item.active:hover {
+  background: var(--primary-hover);
 }

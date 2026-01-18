@@ -124,13 +124,67 @@
                     <div class="card-header"
                         style="display:flex;align-items:center;gap:24px;justify-content:flex-start !important;">
                         <span class="card-title" style="font-size:20px;font-weight:700;">题库列表</span>
-                        <div class="filter-group" id="question-filter-group" style="display:flex;gap:8px;">
-                            <button class="btn btn-sm btn-primary active" data-type="single"
-                                onclick="toggleQuestionFilter(this)">单选题</button>
-                            <button class="btn btn-sm btn-primary active" data-type="multiple"
-                                onclick="toggleQuestionFilter(this)">多选题</button>
-                            <button class="btn btn-sm btn-primary active" data-type="judge"
-                                onclick="toggleQuestionFilter(this)">判断题</button>
+                        <div class="filter-group" style="display:flex;gap:12px;align-items:center;">
+                            <!-- 题库归属筛选 -->
+                            <div class="dropdown-filter" id="group-filter-dropdown" style="position:relative;">
+                                <button class="btn btn-sm btn-primary" id="btn-group-filter"
+                                    onclick="toggleFilterDropdown('group')"
+                                    style="min-width:100px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                                    <span id="group-filter-label">全部题库</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </button>
+                                <div class="dropdown-menu" id="group-filter-menu"
+                                    style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:100;max-height:300px;overflow-y:auto;">
+                                </div>
+                            </div>
+                            <!-- 题型筛选 -->
+                            <div class="dropdown-filter" id="type-filter-dropdown" style="position:relative;">
+                                <button class="btn btn-sm btn-primary" id="btn-type-filter"
+                                    onclick="toggleFilterDropdown('type')"
+                                    style="min-width:100px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                                    <span id="type-filter-label">全部题型</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </button>
+                                <div class="dropdown-menu" id="type-filter-menu"
+                                    style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:140px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:100;max-height:300px;overflow-y:auto;">
+                                </div>
+                            </div>
+                            <!-- 专业筛选 -->
+                            <div class="dropdown-filter" id="major-filter-dropdown" style="position:relative;">
+                                <button class="btn btn-sm btn-primary" id="btn-major-filter"
+                                    onclick="toggleFilterDropdown('major')"
+                                    style="min-width:100px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                                    <span id="major-filter-label">全部专业</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </button>
+                                <div class="dropdown-menu" id="major-filter-menu"
+                                    style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:100;max-height:300px;overflow-y:auto;">
+                                </div>
+                            </div>
+                            <!-- 设备类型筛选 -->
+                            <div class="dropdown-filter" id="device-filter-dropdown" style="position:relative;">
+                                <button class="btn btn-sm btn-secondary" id="btn-device-filter"
+                                    onclick="toggleFilterDropdown('device')" disabled
+                                    style="min-width:100px;display:flex;align-items:center;gap:4px;justify-content:center;opacity:0.5;cursor:not-allowed;">
+                                    <span id="device-filter-label">全部设备</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                    </svg>
+                                </button>
+                                <div class="dropdown-menu" id="device-filter-menu"
+                                    style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:100;max-height:300px;overflow-y:auto;">
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="card-body" id="questions-list"></div>

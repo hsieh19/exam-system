@@ -48,8 +48,8 @@ function showAlert(message, callback) {
     alertCallback = callback;
     const msgDiv = document.getElementById('alert-message');
     if (msgDiv) {
-        // 自动将换行符转为 <br>，同时支持传入 HTML
-        msgDiv.innerHTML = message.includes('<') ? message : message.replace(/\n/g, '<br>');
+        // 自动将换行符转为 <br>，使用 escapeHtml 防止 XSS
+        msgDiv.innerHTML = escapeHtml(message).replace(/\n/g, '<br>');
     }
     const overlay = document.getElementById('alert-modal-overlay');
     if (overlay) {

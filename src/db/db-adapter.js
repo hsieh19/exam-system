@@ -91,13 +91,15 @@ const sqliteAdapter = {
                 answer TEXT NOT NULL,
                 category TEXT,
                 deviceType TEXT,
-                groupId TEXT
+                groupId TEXT,
+                updatedAt TEXT
             );
             CREATE TABLE IF NOT EXISTS papers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 questions TEXT,
                 rules TEXT,
+                published INTEGER DEFAULT 0,
                 createDate TEXT,
                 targetGroups TEXT,
                 targetUsers TEXT,
@@ -130,6 +132,22 @@ const sqliteAdapter = {
             );
         `;
         this.db.run(tables);
+
+        // 数据库迁移：为现有表添加新字段（如果不存在）
+        try {
+            this.db.run("ALTER TABLE questions ADD COLUMN updatedAt TEXT");
+        } catch (e) {
+            if (!e.message.includes('duplicate column')) {
+                console.log('Migration: updatedAt column already exists or error:', e.message);
+            }
+        }
+        try {
+            this.db.run("ALTER TABLE papers ADD COLUMN published INTEGER DEFAULT 0");
+        } catch (e) {
+            if (!e.message.includes('duplicate column')) {
+                console.log('Migration: published column already exists or error:', e.message);
+            }
+        }
 
         // 确保有管理员账号
         const admin = this.db.exec("SELECT * FROM users WHERE username = 'admin'");
@@ -240,13 +258,15 @@ const mysqlAdapter = {
                 answer TEXT NOT NULL,
                 category VARCHAR(255),
                 deviceType VARCHAR(255),
-                groupId VARCHAR(255)
+                groupId VARCHAR(255),
+                updatedAt VARCHAR(50)
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 questions TEXT,
                 rules TEXT,
+                published TINYINT DEFAULT 0,
                 createDate VARCHAR(50),
                 targetGroups TEXT,
                 targetUsers TEXT,
@@ -368,13 +388,15 @@ const postgresAdapter = {
                 answer TEXT NOT NULL,
                 category VARCHAR(255),
                 "deviceType" VARCHAR(255),
-                "groupId" VARCHAR(255)
+                "groupId" VARCHAR(255),
+                "updatedAt" VARCHAR(50)
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 questions TEXT,
                 rules TEXT,
+                published INTEGER DEFAULT 0,
                 "createDate" VARCHAR(50),
                 "targetGroups" TEXT,
                 "targetUsers" TEXT,
@@ -659,14 +681,16 @@ module.exports = {
     },
     addQuestion: async (q) => {
         const id = q.id || 'q_' + Date.now();
-        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null]);
-        return { id, ...q };
+        const now = new Date().toISOString();
+        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, now]);
+        return { id, ...q, updatedAt: now };
     },
     updateQuestion: async (q) => {
-        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=? WHERE id=?",
-            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.id]);
-        return q;
+        const now = new Date().toISOString();
+        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=?, updatedAt=? WHERE id=?",
+            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, now, q.id]);
+        return { ...q, updatedAt: now };
     },
     deleteQuestion: async (id) => {
         await run("DELETE FROM questions WHERE id = ?", [id]);

@@ -202,7 +202,7 @@ async function startServer() {
         const user = await db.login(username, password);
         if (user) {
             // 生成 Token
-            const token = 'tk_' + Date.now() + '_' + Math.random().toString(36).substr(2);
+            const token = 'tk_' + Date.now() + '_' + Math.random().toString(36).slice(2);
             sessions.set(token, user);
             res.json({ token, user });
         } else {
@@ -473,21 +473,22 @@ async function startServer() {
     });
 
     // ==================== 记录接口 ====================
-    app.get('/api/records', async (req, res) => {
+    app.get('/api/records', adminMiddleware, async (req, res) => {
         res.json(await db.getRecords());
     });
 
-    app.get('/api/records/paper/:paperId', async (req, res) => {
+    app.get('/api/records/paper/:paperId', adminMiddleware, async (req, res) => {
         res.json(await db.getRecordsByPaper(req.params.paperId));
     });
 
-    app.delete('/api/records/paper/:paperId', async (req, res) => {
+    app.delete('/api/records/paper/:paperId', adminMiddleware, async (req, res) => {
         await db.deleteRecordsByPaper(req.params.paperId);
         res.json({ success: true });
     });
 
     app.post('/api/records', async (req, res) => {
-        const record = { id: 'r_' + Date.now(), ...req.body };
+        // 确保用户只能为自己提交记录
+        const record = { id: 'r_' + Date.now(), ...req.body, userId: req.user.id };
         res.json(await db.addRecord(record));
     });
 

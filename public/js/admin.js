@@ -605,22 +605,273 @@ async function deleteDevice(id) {
 }
 
 // ========== 题库管理 ==========
-let currentQuestionFilters = ['single', 'multiple', 'judge'];
+// 筛选状态
+let currentGroupFilter = 'all'; // 'all' | 'public' | groupId
+let currentTypeFilter = 'all';  // 'all' | 'single' | 'multiple' | 'judge'
+let currentMajorFilter = 'all'; // 'all' | majorId
+let currentDeviceFilter = 'all'; // 'all' | deviceId
+
+// 通用下拉菜单控制
+function toggleFilterDropdown(filterType) {
+    // 设备筛选：如果专业是全部，则不允许打开
+    if (filterType === 'device' && currentMajorFilter === 'all') {
+        return;
+    }
+
+    // 先关闭所有其他下拉菜单
+    ['group', 'type', 'major', 'device'].forEach(type => {
+        if (type !== filterType) {
+            const otherMenu = document.getElementById(`${type}-filter-menu`);
+            if (otherMenu) otherMenu.style.display = 'none';
+        }
+    });
+
+    const menu = document.getElementById(`${filterType}-filter-menu`);
+    if (!menu) return;
+
+    if (menu.style.display === 'none') {
+        // 初始化对应的下拉菜单
+        if (filterType === 'group') initGroupFilterDropdown();
+        else if (filterType === 'type') initTypeFilterDropdown();
+        else if (filterType === 'major') initMajorFilterDropdown();
+        else if (filterType === 'device') initDeviceFilterDropdown();
+
+        menu.style.display = 'block';
+        // 点击其他地方关闭
+        setTimeout(() => {
+            document.addEventListener('click', (e) => closeFilterDropdown(e, filterType), { once: true });
+        }, 0);
+    } else {
+        menu.style.display = 'none';
+    }
+}
+
+function closeFilterDropdown(e, filterType) {
+    const dropdown = document.getElementById(`${filterType}-filter-dropdown`);
+    const menu = document.getElementById(`${filterType}-filter-menu`);
+    if (dropdown && menu && !dropdown.contains(e.target)) {
+        menu.style.display = 'none';
+    }
+}
+
+// 题库归属筛选
+function initGroupFilterDropdown() {
+    const currentUser = Storage.getCurrentUser();
+    const menu = document.getElementById('group-filter-menu');
+    if (!menu) return;
+
+    let options = [];
+
+    if (currentUser.role === 'super_admin') {
+        options.push({ id: 'all', name: '全部题库' });
+        options.push({ id: 'public', name: '公共题库' });
+        cachedData.groups.forEach(g => {
+            options.push({ id: g.id, name: g.name });
+        });
+    } else {
+        options.push({ id: 'all', name: '全部题库' });
+        options.push({ id: 'public', name: '公共题库' });
+        const myGroup = cachedData.groups.find(g => g.id === currentUser.groupId);
+        if (myGroup) {
+            options.push({ id: myGroup.id, name: myGroup.name });
+        }
+    }
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${currentGroupFilter === opt.id ? 'active' : ''}" 
+             onclick="selectFilter('group', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    updateFilterLabel('group', options);
+}
+
+// 题型筛选
+function initTypeFilterDropdown() {
+    const menu = document.getElementById('type-filter-menu');
+    if (!menu) return;
+
+    const options = [
+        { id: 'all', name: '全部题型' },
+        { id: 'single', name: '单选题' },
+        { id: 'multiple', name: '多选题' },
+        { id: 'judge', name: '判断题' }
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${currentTypeFilter === opt.id ? 'active' : ''}" 
+             onclick="selectFilter('type', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    updateFilterLabel('type', options);
+}
+
+// 专业筛选
+function initMajorFilterDropdown() {
+    const menu = document.getElementById('major-filter-menu');
+    if (!menu) return;
+
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+    const options = [
+        { id: 'all', name: '全部专业' },
+        ...majors.map(m => ({ id: m.id, name: m.name }))
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${currentMajorFilter === opt.id ? 'active' : ''}" 
+             onclick="selectFilter('major', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    updateFilterLabel('major', options);
+}
+
+// 更新筛选按钮标签
+function updateFilterLabel(filterType, options) {
+    const label = document.getElementById(`${filterType}-filter-label`);
+    let currentValue;
+    if (filterType === 'group') currentValue = currentGroupFilter;
+    else if (filterType === 'type') currentValue = currentTypeFilter;
+    else if (filterType === 'major') currentValue = currentMajorFilter;
+    else if (filterType === 'device') currentValue = currentDeviceFilter;
+
+    const selectedOpt = options.find(o => o.id === currentValue);
+    if (label && selectedOpt) {
+        label.textContent = selectedOpt.name;
+    }
+}
+
+// 选择筛选条件
+function selectFilter(filterType, value, name) {
+    if (filterType === 'group') currentGroupFilter = value;
+    else if (filterType === 'type') currentTypeFilter = value;
+    else if (filterType === 'major') {
+        currentMajorFilter = value;
+        // 级联：切换专业时重置设备类型筛选
+        currentDeviceFilter = 'all';
+        updateDeviceFilterButton();
+    }
+    else if (filterType === 'device') currentDeviceFilter = value;
+
+    document.getElementById(`${filterType}-filter-label`).textContent = name;
+    document.getElementById(`${filterType}-filter-menu`).style.display = 'none';
+    loadQuestions();
+}
+
+// 更新设备类型筛选按钮状态
+function updateDeviceFilterButton() {
+    const btn = document.getElementById('btn-device-filter');
+    const label = document.getElementById('device-filter-label');
+    if (!btn || !label) return;
+
+    if (currentMajorFilter === 'all') {
+        // 禁用设备筛选
+        btn.disabled = true;
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        label.textContent = '全部设备';
+        currentDeviceFilter = 'all';
+    } else {
+        // 启用设备筛选
+        btn.disabled = false;
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    }
+}
+
+// 设备类型筛选
+function initDeviceFilterDropdown() {
+    const menu = document.getElementById('device-filter-menu');
+    if (!menu) return;
+
+    // 如果没有选择专业，不初始化
+    if (currentMajorFilter === 'all') {
+        menu.innerHTML = '';
+        return;
+    }
+
+    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === currentMajorFilter);
+    const options = [
+        { id: 'all', name: '全部设备' },
+        ...devices.map(d => ({ id: d.id, name: d.name }))
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${currentDeviceFilter === opt.id ? 'active' : ''}" 
+             onclick="selectFilter('device', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    updateFilterLabel('device', options);
+}
+
+// 初始化所有筛选下拉菜单
+function initAllFilterDropdowns() {
+    initGroupFilterDropdown();
+    initTypeFilterDropdown();
+    initMajorFilterDropdown();
+    initDeviceFilterDropdown();
+    updateDeviceFilterButton();
+}
 
 function loadQuestions() {
     let questions = cachedData.questions;
     const currentUser = Storage.getCurrentUser();
 
-    // 过滤出选中的题型
-    questions = questions.filter(q => currentQuestionFilters.includes(q.type));
+    // 初始化下拉菜单（首次加载时）
+    initAllFilterDropdowns();
+
+    // 按题库归属筛选
+    if (currentGroupFilter === 'all') {
+        // 全部：不额外过滤
+    } else if (currentGroupFilter === 'public') {
+        questions = questions.filter(q => !q.groupId);
+    } else {
+        questions = questions.filter(q => q.groupId === currentGroupFilter);
+    }
+
+    // 按题型筛选
+    if (currentTypeFilter !== 'all') {
+        questions = questions.filter(q => q.type === currentTypeFilter);
+    }
+
+    // 按专业筛选
+    if (currentMajorFilter !== 'all') {
+        questions = questions.filter(q => q.category === currentMajorFilter);
+    }
+
+    // 按设备类型筛选
+    if (currentDeviceFilter !== 'all') {
+        questions = questions.filter(q => q.deviceType === currentDeviceFilter);
+    }
 
     const typeMap = { single: '单选题', multiple: '多选题', judge: '判断题' };
     const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
     const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
     const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
 
+    // 格式化时间显示
+    const formatDateTime = (isoStr) => {
+        if (!isoStr) return '-';
+        const d = new Date(isoStr);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+
     const html = questions.length ? `<div class="table-container"><table class="data-table">
-    <thead><tr><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>操作</th></tr></thead>
+    <thead><tr><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>最后修改</th><th>操作</th></tr></thead>
     <tbody>${questions.map(q => {
         const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && q.groupId === currentUser.groupId);
         const canDelete = canEdit;
@@ -631,34 +882,14 @@ function loadQuestions() {
       <td><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
       <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
       <td><span class="badge badge-primary">${typeMap[q.type]}</span></td>
+      <td style="white-space:nowrap;">${formatDateTime(q.updatedAt)}</td>
       <td>
         ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>` : ''}
         ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteQuestion('${q.id}')">删除</button>` : ''}
       </td>
     </tr>`;
-    }).join('')}</tbody></table></div>` : `<p class="text-muted">所选题型中暂无题目</p>`;
+    }).join('')}</tbody></table></div>` : `<p class="text-muted">所选条件下暂无题目</p>`;
     document.getElementById('questions-list').innerHTML = html;
-}
-
-function toggleQuestionFilter(btn) {
-    const type = btn.dataset.type;
-
-    if (btn.classList.contains('active')) {
-        // 如果至少剩下一个，才允许取消
-        if (currentQuestionFilters.length <= 1) {
-            showAlert('至少需保留一个题型。');
-            return;
-        }
-        btn.classList.remove('active', 'btn-primary');
-        btn.classList.add('btn-secondary');
-        currentQuestionFilters = currentQuestionFilters.filter(t => t !== type);
-    } else {
-        btn.classList.add('active', 'btn-primary');
-        btn.classList.remove('btn-secondary');
-        currentQuestionFilters.push(type);
-    }
-
-    loadQuestions();
 }
 
 function showAddQuestion(type) {
