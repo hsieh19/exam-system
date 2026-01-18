@@ -130,6 +130,17 @@ const sqliteAdapter = {
                 type TEXT NOT NULL,
                 parentId TEXT
             );
+            CREATE TABLE IF NOT EXISTS system_logs (
+                id TEXT PRIMARY KEY,
+                action TEXT NOT NULL,
+                target TEXT NOT NULL,
+                targetId TEXT,
+                userId TEXT,
+                username TEXT,
+                details TEXT,
+                ip TEXT,
+                createdAt TEXT NOT NULL
+            );
         `;
         this.db.run(tables);
 
@@ -296,6 +307,17 @@ const mysqlAdapter = {
                 name VARCHAR(255) NOT NULL,
                 type VARCHAR(50) NOT NULL,
                 parentId VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS system_logs (
+                id VARCHAR(255) PRIMARY KEY,
+                action VARCHAR(50) NOT NULL,
+                target VARCHAR(50) NOT NULL,
+                targetId VARCHAR(255),
+                userId VARCHAR(255),
+                username VARCHAR(255),
+                details TEXT,
+                ip VARCHAR(100),
+                createdAt VARCHAR(50) NOT NULL
             )`
         ];
 
@@ -426,6 +448,17 @@ const postgresAdapter = {
                 name VARCHAR(255) NOT NULL,
                 type VARCHAR(50) NOT NULL,
                 "parentId" VARCHAR(255)
+            )`,
+            `CREATE TABLE IF NOT EXISTS system_logs (
+                id VARCHAR(255) PRIMARY KEY,
+                action VARCHAR(50) NOT NULL,
+                target VARCHAR(50) NOT NULL,
+                "targetId" VARCHAR(255),
+                "userId" VARCHAR(255),
+                username VARCHAR(255),
+                details TEXT,
+                ip VARCHAR(100),
+                "createdAt" VARCHAR(50) NOT NULL
             )`
         ];
 
@@ -819,5 +852,116 @@ module.exports = {
     },
     deleteCategory: async (id) => {
         await run("DELETE FROM categories WHERE id = ? OR parentId = ?", [id, id]);
+    },
+
+    // ==================== 系统日志相关 ====================
+    addSystemLog: async (log) => {
+        const id = log.id || 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const createdAt = new Date().toISOString();
+        await run(
+            "INSERT INTO system_logs (id, action, target, targetId, userId, username, details, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, log.action, log.target, log.targetId || null, log.userId || null, log.username || null, 
+             JSON.stringify(log.details || {}), log.ip || null, createdAt]
+        );
+        return { id, ...log, createdAt };
+    },
+
+    getSystemLogs: async (filter = {}) => {
+        let sql = "SELECT * FROM system_logs";
+        const params = [];
+        const conditions = [];
+
+        // 操作类型筛选
+        if (filter.action) {
+            conditions.push("action = ?");
+            params.push(filter.action);
+        }
+
+        // 操作对象筛选
+        if (filter.target) {
+            conditions.push("target = ?");
+            params.push(filter.target);
+        }
+
+        // 用户筛选
+        if (filter.userId) {
+            conditions.push("userId = ?");
+            params.push(filter.userId);
+        }
+
+        // 时间范围筛选
+        if (filter.startDate) {
+            conditions.push("createdAt >= ?");
+            params.push(filter.startDate);
+        }
+        if (filter.endDate) {
+            conditions.push("createdAt <= ?");
+            params.push(filter.endDate);
+        }
+
+        if (conditions.length > 0) {
+            sql += " WHERE " + conditions.join(" AND ");
+        }
+
+        // 按时间倒序
+        sql += " ORDER BY createdAt DESC";
+
+        // 分页
+        if (filter.limit) {
+            sql += " LIMIT ?";
+            params.push(filter.limit);
+            if (filter.offset) {
+                sql += " OFFSET ?";
+                params.push(filter.offset);
+            }
+        }
+
+        const rows = await query(sql, params);
+        return rows.map(log => ({
+            ...log,
+            details: log.details ? JSON.parse(log.details) : {}
+        }));
+    },
+
+    getSystemLogsCount: async (filter = {}) => {
+        let sql = "SELECT COUNT(*) as count FROM system_logs";
+        const params = [];
+        const conditions = [];
+
+        if (filter.action) {
+            conditions.push("action = ?");
+            params.push(filter.action);
+        }
+        if (filter.target) {
+            conditions.push("target = ?");
+            params.push(filter.target);
+        }
+        if (filter.userId) {
+            conditions.push("userId = ?");
+            params.push(filter.userId);
+        }
+        if (filter.startDate) {
+            conditions.push("createdAt >= ?");
+            params.push(filter.startDate);
+        }
+        if (filter.endDate) {
+            conditions.push("createdAt <= ?");
+            params.push(filter.endDate);
+        }
+
+        if (conditions.length > 0) {
+            sql += " WHERE " + conditions.join(" AND ");
+        }
+
+        const rows = await query(sql, params);
+        return rows[0]?.count || 0;
+    },
+
+    clearSystemLogs: async (beforeDate) => {
+        if (beforeDate) {
+            await run("DELETE FROM system_logs WHERE createdAt < ?", [beforeDate]);
+        } else {
+            await run("DELETE FROM system_logs");
+        }
     }
 };

@@ -283,5 +283,28 @@ const Storage = {
       },
       body: formData
     }).then(r => r.json());
+  },
+
+  // ==================== 系统日志相关 ====================
+  getSystemLogs(params = {}) {
+    const query = new URLSearchParams();
+    if (params.action) query.set('action', params.action);
+    if (params.target) query.set('target', params.target);
+    if (params.userId) query.set('userId', params.userId);
+    if (params.startDate) query.set('startDate', params.startDate);
+    if (params.endDate) query.set('endDate', params.endDate);
+    if (params.page) query.set('page', params.page);
+    if (params.pageSize) query.set('pageSize', params.pageSize);
+
+    const queryStr = query.toString();
+    const url = `${API_BASE}/api/logs${queryStr ? '?' + queryStr : ''}`;
+    return authFetch(url).then(r => r.json());
+  },
+
+  clearSystemLogs(beforeDate) {
+    return authFetch(`${API_BASE}/api/logs`, {
+      method: 'DELETE',
+      body: JSON.stringify({ beforeDate })
+    }).then(r => r.json());
   }
 };

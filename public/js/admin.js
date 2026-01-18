@@ -22,6 +22,10 @@ function checkPermissions() {
         const dbNavItem = document.querySelector('.nav-item[data-page="database"]');
         if (dbNavItem) dbNavItem.style.display = 'none';
 
+        // 隐藏系统日志
+        const logsNavItem = document.querySelector('.nav-item[data-page="logs"]');
+        if (logsNavItem) logsNavItem.style.display = 'none';
+
         // 隐藏“设置专业”按钮
         const categoryBtn = document.querySelector('button[onclick="showCategorySettings()"]');
         if (categoryBtn) categoryBtn.style.display = 'none';
@@ -54,6 +58,10 @@ function initNavigation() {
             else if (page === 'ranking') loadAdminRankingOptions();
             else if (page === 'analysis') loadAdminAnalysisOptions();
             else if (page === 'database') loadDbConfig();
+            else if (page === 'logs') {
+                initLogDateFilters();
+                loadSystemLogs();
+            }
         });
     });
 
@@ -2306,4 +2314,309 @@ async function importSqliteDb(input) {
 
     // 重置 input，以便再次选择同一文件
     input.value = '';
+}
+
+// ========== 系统日志 ==========
+let currentLogPage = 1;
+const LOG_PAGE_SIZE = 20;
+
+// 级联筛选配置
+const LOG_TARGET_ACTIONS = {
+    '': [ // 全部对象
+        { value: '', label: '全部操作' },
+        { value: 'login', label: '登录' },
+        { value: 'login_failed', label: '登录失败' },
+        { value: 'create', label: '创建' },
+        { value: 'update', label: '更新' },
+        { value: 'delete', label: '删除' },
+        { value: 'delete_all', label: '批量删除' },
+        { value: 'publish', label: '发布' },
+        { value: 'switch', label: '切换' },
+        { value: 'clear', label: '清理' }
+    ],
+    'user': [
+        { value: '', label: '全部操作' },
+        { value: 'login', label: '登录' },
+        { value: 'login_failed', label: '登录失败' },
+        { value: 'create', label: '创建用户' },
+        { value: 'update', label: '更新用户' },
+        { value: 'delete', label: '删除用户' }
+    ],
+    'question': [
+        { value: '', label: '全部操作' },
+        { value: 'create', label: '创建题目' },
+        { value: 'update', label: '更新题目' },
+        { value: 'delete', label: '删除题目' },
+        { value: 'delete_all', label: '清空题库' }
+    ],
+    'paper': [
+        { value: '', label: '全部操作' },
+        { value: 'create', label: '创建试卷' },
+        { value: 'update', label: '更新试卷' },
+        { value: 'publish', label: '发布试卷' },
+        { value: 'delete', label: '删除试卷' }
+    ],
+    'database': [
+        { value: '', label: '全部操作' },
+        { value: 'switch', label: '切换数据库' }
+    ],
+    'logs': [
+        { value: '', label: '全部操作' },
+        { value: 'clear', label: '清理日志' }
+    ]
+};
+
+function updateLogActionOptions() {
+    const targetFilter = document.getElementById('log-target-filter');
+    const actionFilter = document.getElementById('log-action-filter');
+    const selectedTarget = targetFilter ? targetFilter.value : '';
+    const currentAction = actionFilter ? actionFilter.value : '';
+
+    if (!actionFilter) return;
+
+    const options = LOG_TARGET_ACTIONS[selectedTarget] || LOG_TARGET_ACTIONS[''];
+
+    // 保留当前选中的值（如果由于切换对象导致当前动作不可用，则重置为''）
+    let newAction = '';
+    const isAvailable = options.some(opt => opt.value === currentAction);
+    if (isAvailable) newAction = currentAction;
+
+    actionFilter.innerHTML = options.map(opt =>
+        `<option value="${opt.value}">${opt.label}</option>`
+    ).join('');
+
+    actionFilter.value = newAction;
+    loadSystemLogs(1); // 触发重新加载，重置页码为1
+}
+
+// 绑定级联事件
+document.addEventListener('DOMContentLoaded', () => {
+    const targetSelect = document.getElementById('log-target-filter');
+    if (targetSelect) {
+        // 移除原有的 onchange="loadSystemLogs()"，改为调用 updateLogActionOptions
+        targetSelect.removeAttribute('onchange');
+        targetSelect.addEventListener('change', updateLogActionOptions);
+    }
+});
+
+async function loadSystemLogs(page = 1) {
+    currentLogPage = page;
+
+    const params = {
+        page,
+        pageSize: LOG_PAGE_SIZE
+    };
+
+    // 获取筛选条件
+    const actionFilter = document.getElementById('log-action-filter')?.value;
+    const targetFilter = document.getElementById('log-target-filter')?.value;
+    const startDate = document.getElementById('log-start-date')?.value;
+    const endDate = document.getElementById('log-end-date')?.value;
+
+    if (actionFilter) params.action = actionFilter;
+    if (targetFilter) params.target = targetFilter;
+    if (startDate) params.startDate = startDate + 'T00:00:00.000Z';
+    if (endDate) params.endDate = endDate + 'T23:59:59.999Z';
+
+    try {
+        const result = await Storage.getSystemLogs(params);
+        renderSystemLogs(result.logs);
+        renderLogsPagination(result);
+    } catch (e) {
+        console.error('加载日志失败:', e);
+        document.getElementById('logs-list').innerHTML = '<div class="empty-state"><p>加载日志失败</p></div>';
+    }
+}
+
+function renderSystemLogs(logs) {
+    const container = document.getElementById('logs-list');
+
+    if (!logs || logs.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>暂无日志记录</p></div>';
+        return;
+    }
+
+    const actionLabels = {
+        'login': '登录',
+        'login_failed': '登录失败',
+        'create': '创建',
+        'update': '更新',
+        'delete': '删除',
+        'delete_all': '批量删除',
+        'publish': '发布',
+        'switch': '切换',
+        'clear': '清理'
+    };
+
+    const targetLabels = {
+        'user': '用户',
+        'question': '题目',
+        'paper': '试卷',
+        'database': '数据库',
+        'logs': '日志'
+    };
+
+    const actionStyles = {
+        'login': 'background:#10b981;color:white;',
+        'login_failed': 'background:#ef4444;color:white;',
+        'create': 'background:#3b82f6;color:white;',
+        'update': 'background:#f59e0b;color:white;',
+        'delete': 'background:#ef4444;color:white;',
+        'delete_all': 'background:#dc2626;color:white;',
+        'publish': 'background:#8b5cf6;color:white;',
+        'switch': 'background:#6366f1;color:white;',
+        'clear': 'background:#64748b;color:white;'
+    };
+
+    const html = `
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:160px;">时间</th>
+                        <th style="width:100px;">操作</th>
+                        <th style="width:80px;">对象</th>
+                        <th style="width:120px;">操作者</th>
+                        <th>详情</th>
+                        <th style="width:120px;">IP地址</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${logs.map(log => {
+        const time = new Date(log.createdAt).toLocaleString('zh-CN');
+        const actionLabel = actionLabels[log.action] || log.action;
+        const targetLabel = targetLabels[log.target] || log.target;
+        const actionStyle = actionStyles[log.action] || 'background:#94a3b8;color:white;';
+
+        let detailsStr = '';
+        if (log.details && typeof log.details === 'object') {
+            const parts = [];
+            if (log.details.username) parts.push('用户名: ' + log.details.username);
+            if (log.details.name) parts.push('名称: ' + log.details.name);
+            if (log.details.type) parts.push('类型: ' + log.details.type);
+            if (log.details.role) parts.push('角色: ' + log.details.role);
+            if (log.details.dbType) parts.push('数据库: ' + log.details.dbType);
+            if (log.details.beforeDate) parts.push('清理日期: ' + log.details.beforeDate);
+            detailsStr = parts.join(', ') || '-';
+        }
+
+        return `
+                            <tr>
+                                <td style="font-size:13px;color:var(--text-secondary);">${time}</td>
+                                <td><span class="badge" style="${actionStyle}font-size:11px;padding:3px 8px;border-radius:4px;">${escapeHtml(actionLabel)}</span></td>
+                                <td style="font-size:13px;">${escapeHtml(targetLabel)}</td>
+                                <td style="font-size:13px;">${escapeHtml(log.username || '-')}</td>
+                                <td style="font-size:13px;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(detailsStr)}">${escapeHtml(detailsStr)}</td>
+                                <td style="font-size:12px;color:var(--text-muted);font-family:monospace;">${escapeHtml(log.ip || '-')}</td>
+                            </tr>
+                        `;
+    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+function renderLogsPagination(result) {
+    const container = document.getElementById('logs-pagination');
+    const { total, page, totalPages } = result;
+
+    if (totalPages <= 1) {
+        container.innerHTML = `<span style="color:var(--text-secondary);font-size:13px;">共 ${total} 条记录</span><div></div>`;
+        return;
+    }
+
+    let pagesHtml = '';
+    const maxVisible = 5;
+    let startPage = Math.max(1, page - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    if (startPage > 1) {
+        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(1)">1</button>`;
+        if (startPage > 2) pagesHtml += `<span style="padding:0 8px;">...</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        const isActive = i === page;
+        pagesHtml += `<button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}" onclick="loadSystemLogs(${i})">${i}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pagesHtml += `<span style="padding:0 8px;">...</span>`;
+        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${totalPages})">${totalPages}</button>`;
+    }
+
+    container.innerHTML = `
+        <span style="color:var(--text-secondary);font-size:13px;">共 ${total} 条记录，第 ${page}/${totalPages} 页</span>
+        <div style="display:flex;gap:4px;align-items:center;">
+            <button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+            ${pagesHtml}
+            <button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+        </div>
+    `;
+}
+
+function initLogDateFilters() {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 2); //最近3天（含今天）
+
+    const formatDate = (date) => {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
+
+    const startEl = document.getElementById('log-start-date');
+    const endEl = document.getElementById('log-end-date');
+    if (startEl) startEl.value = formatDate(start);
+    if (endEl) endEl.value = formatDate(end);
+}
+
+function resetLogFilters() {
+    document.getElementById('log-action-filter').value = '';
+    document.getElementById('log-target-filter').value = '';
+    initLogDateFilters();
+    loadSystemLogs(1);
+}
+
+function showClearLogsModal() {
+    // 计算30天前的日期作为默认值
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const defaultDate = thirtyDaysAgo.toISOString().split('T')[0];
+
+    openModal('清理历史日志',
+        `<div class="form-group">
+            <label class="form-label">清理此日期之前的日志</label>
+            <input type="date" class="form-input" id="clear-logs-date" value="${defaultDate}">
+            <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">留空则清理所有日志</p>
+        </div>
+        <div style="padding:12px;background:rgba(239,68,68,0.1);border-radius:var(--radius-md);margin-top:12px;">
+            <p style="color:var(--danger);font-size:13px;margin:0;"><strong>警告：</strong>此操作不可撤销！</p>
+        </div>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
+         <button class="btn btn-danger" onclick="confirmClearLogs()">确认清理</button>`
+    );
+}
+
+async function confirmClearLogs() {
+    const dateInput = document.getElementById('clear-logs-date');
+    const beforeDate = dateInput?.value ? dateInput.value + 'T23:59:59.999Z' : null;
+
+    try {
+        await Storage.clearSystemLogs(beforeDate);
+        closeModal();
+        showAlert('日志清理成功');
+        loadSystemLogs(1);
+    } catch (e) {
+        showAlert('清理失败: ' + e.message);
+    }
 }

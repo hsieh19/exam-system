@@ -61,6 +61,16 @@
                     </svg>
                     数据库
                 </div>
+                <div class="nav-item" data-page="logs">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    系统日志
+                </div>
             </nav>
             <div class="sidebar-footer">
                 <div class="user-info" id="user-info"></div>
@@ -401,6 +411,86 @@
                     </div>
                     <div class="card-body" style="padding:12px 16px;">
                         <p style="margin:0;color:var(--text-secondary);font-size:13px;">高性能开源数据库，需在服务器端配置连接信息</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统日志页面 -->
+            <div id="page-logs" class="page-content hidden">
+                <div class="page-header">
+                    <h1 class="page-title">系统日志</h1>
+                </div>
+                <div class="card">
+                    <div class="card-header"
+                        style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:16px 20px;">
+                        <!-- 左侧：筛选条件 -->
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <select class="form-select" id="log-target-filter" onchange="updateLogActionOptions()"
+                                style="width:110px;">
+                                <option value="">全部对象</option>
+                                <option value="user">用户</option>
+                                <option value="question">题目</option>
+                                <option value="paper">试卷</option>
+                                <option value="database">数据库</option>
+                                <option value="logs">日志</option>
+                            </select>
+                            <select class="form-select" id="log-action-filter" onchange="loadSystemLogs()"
+                                style="width:120px;">
+                                <option value="">全部操作</option>
+                                <option value="login">登录</option>
+                                <option value="login_failed">登录失败</option>
+                                <option value="create">创建</option>
+                                <option value="update">更新</option>
+                                <option value="delete">删除</option>
+                                <option value="delete_all">批量删除</option>
+                                <option value="publish">发布</option>
+                                <option value="switch">切换</option>
+                                <option value="clear">清理</option>
+                            </select>
+
+                            <!-- 整合的日期选择器 -->
+                            <div
+                                style="display:flex;align-items:center;border:1px solid var(--border);border-radius:4px;overflow:hidden;background:var(--input-bg, rgba(255,255,255,0.05));">
+                                <input type="date" id="log-start-date" onchange="loadSystemLogs()"
+                                    style="border:none;background:transparent;color:var(--text-primary);width:125px;padding:6px 10px;font-size:14px;outline:none;">
+                                <span style="color:var(--text-secondary);font-size:12px;padding:0 4px;">至</span>
+                                <input type="date" id="log-end-date" onchange="loadSystemLogs()"
+                                    style="border:none;background:transparent;color:var(--text-primary);width:125px;padding:6px 10px;font-size:14px;outline:none;">
+                            </div>
+                        </div>
+
+                        <!-- 右侧：操作按钮 -->
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-secondary btn-sm" onclick="resetLogFilters()" title="重置筛选"
+                                style="display:flex;align-items:center;gap:4px;">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                    <path d="M3 3v5h5"></path>
+                                </svg>
+                                <span>重置</span>
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="showClearLogsModal()"
+                                style="display:flex;align-items:center;gap:4px;">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                    </path>
+                                </svg>
+                                <span>清理日志</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body" id="logs-list">
+                        <div class="empty-state">
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    <!-- 分页 -->
+                    <div class="card-footer" id="logs-pagination"
+                        style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-top:1px solid var(--border);">
                     </div>
                 </div>
             </div>

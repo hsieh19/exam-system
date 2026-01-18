@@ -49,6 +49,31 @@ async function startServer() {
     const adminMiddleware = roleMiddleware(['super_admin', 'group_admin']);
     const superAdminMiddleware = roleMiddleware(['super_admin']);
 
+    // 获取客户端IP
+    const getClientIp = (req) => {
+        return req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+            req.connection?.remoteAddress ||
+            req.socket?.remoteAddress ||
+            'unknown';
+    };
+
+    // 记录系统日志辅助函数
+    const logAction = async (action, target, targetId, user, details, ip) => {
+        try {
+            await db.addSystemLog({
+                action,
+                target,
+                targetId,
+                userId: user?.id || null,
+                username: user?.username || null,
+                details,
+                ip
+            });
+        } catch (e) {
+            console.error('记录日志失败:', e.message);
+        }
+    };
+
     // 对 /api 下的所有请求应用鉴权（除了在中间件里排除的）
     app.use('/api', authMiddleware);
 
@@ -89,6 +114,8 @@ async function startServer() {
             await db.switchDatabase(dbType);
             // 清除所有会话，强制重新登录
             sessions.clear();
+            // 记录日志
+            await logAction('switch', 'database', dbType, req.user, { dbType }, getClientIp(req));
             res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
         } catch (e) {
             res.status(500).json({ error: e.message });
@@ -144,7 +171,10 @@ async function startServer() {
             userData.groupId = req.user.groupId;
         }
         const user = { id: 'u_' + Date.now(), ...userData };
-        res.json(await db.addUser(user));
+        const result = await db.addUser(user);
+        // 记录日志
+        await logAction('create', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
+        res.json(result);
     });
 
     app.delete('/api/users/:id', adminMiddleware, async (req, res) => {
@@ -166,6 +196,8 @@ async function startServer() {
         }
 
         await db.deleteUser(req.params.id);
+        // 记录日志
+        await logAction('delete', 'user', req.params.id, req.user, { username: targetUser.username }, getClientIp(req));
         res.json({ success: true });
     });
 
@@ -194,18 +226,26 @@ async function startServer() {
         }
 
         const user = { ...updateData, id: req.params.id };
-        res.json(await db.updateUser(user));
+        const result = await db.updateUser(user);
+        // 记录日志
+        await logAction('update', 'user', req.params.id, req.user, { username: updateData.username }, getClientIp(req));
+        res.json(result);
     });
 
     app.post('/api/login', async (req, res) => {
         const { username, password } = req.body;
+        const clientIp = getClientIp(req);
         const user = await db.login(username, password);
         if (user) {
             // 生成 Token
             const token = 'tk_' + Date.now() + '_' + Math.random().toString(36).slice(2);
             sessions.set(token, user);
+            // 记录登录成功日志
+            await logAction('login', 'user', user.id, user, { username }, clientIp);
             res.json({ token, user });
         } else {
+            // 记录登录失败日志
+            await logAction('login_failed', 'user', null, null, { username }, clientIp);
             res.status(401).json({ error: '用户名或密码错误' });
         }
     });
@@ -258,7 +298,9 @@ async function startServer() {
             questionData.groupId = req.user.groupId;
         }
         const question = { id: 'q_' + Date.now(), ...questionData };
-        res.json(await db.addQuestion(question));
+        const result = await db.addQuestion(question);
+        await logAction('create', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
+        res.json(result);
     });
 
     app.put('/api/questions/:id', adminMiddleware, async (req, res) => {
@@ -274,11 +316,14 @@ async function startServer() {
         if (req.user.role !== 'super_admin') {
             question.groupId = req.user.groupId; // 强制保持本组
         }
-        res.json(await db.updateQuestion(question));
+        const result = await db.updateQuestion(question);
+        await logAction('update', 'question', req.params.id, req.user, { type: question.type }, getClientIp(req));
+        res.json(result);
     });
 
     app.delete('/api/questions/all', superAdminMiddleware, async (req, res) => {
         await db.deleteAllQuestions();
+        await logAction('delete_all', 'question', null, req.user, {}, getClientIp(req));
         res.json({ success: true });
     });
 
@@ -291,6 +336,7 @@ async function startServer() {
         }
 
         await db.deleteQuestion(req.params.id);
+        await logAction('delete', 'question', req.params.id, req.user, {}, getClientIp(req));
         res.json({ success: true });
     });
 
@@ -357,7 +403,9 @@ async function startServer() {
         if (req.user.role !== 'super_admin') {
             paper.groupId = req.user.groupId;
         }
-        res.json(await db.addPaper(paper));
+        const result = await db.addPaper(paper);
+        await logAction('create', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
+        res.json(result);
     });
 
     app.put('/api/papers/:id', adminMiddleware, async (req, res) => {
@@ -417,6 +465,9 @@ async function startServer() {
             deadline
         });
 
+        // 记录系统日志
+        await logAction('publish', 'paper', req.params.id, req.user, { name: existing.name, targetGroups }, getClientIp(req));
+
         res.json(paper);
     });
 
@@ -441,6 +492,7 @@ async function startServer() {
         }
 
         await db.deletePaper(req.params.id);
+        await logAction('delete', 'paper', req.params.id, req.user, { name: existing.name }, getClientIp(req));
         res.json({ success: true });
     });
 
@@ -522,6 +574,44 @@ async function startServer() {
             totalAssigned: totalAssigned || rankedList.length, // 至少是参与人数
             ranking: rankedList
         });
+    });
+
+    // ==================== 系统日志接口 ====================
+    app.get('/api/logs', superAdminMiddleware, async (req, res) => {
+        const filter = {};
+
+        // 筛选参数
+        if (req.query.action) filter.action = req.query.action;
+        if (req.query.target) filter.target = req.query.target;
+        if (req.query.userId) filter.userId = req.query.userId;
+        if (req.query.startDate) filter.startDate = req.query.startDate;
+        if (req.query.endDate) filter.endDate = req.query.endDate;
+
+        // 分页参数
+        const page = parseInt(req.query.page) || 1;
+        const pageSize = parseInt(req.query.pageSize) || 20;
+        filter.limit = pageSize;
+        filter.offset = (page - 1) * pageSize;
+
+        const [logs, total] = await Promise.all([
+            db.getSystemLogs(filter),
+            db.getSystemLogsCount(filter)
+        ]);
+
+        res.json({
+            logs,
+            total,
+            page,
+            pageSize,
+            totalPages: Math.ceil(total / pageSize)
+        });
+    });
+
+    app.delete('/api/logs', superAdminMiddleware, async (req, res) => {
+        const { beforeDate } = req.body;
+        await db.clearSystemLogs(beforeDate);
+        await logAction('clear', 'logs', null, req.user, { beforeDate }, getClientIp(req));
+        res.json({ success: true });
     });
 
     app.listen(PORT, () => {
