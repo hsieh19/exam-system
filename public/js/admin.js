@@ -3,12 +3,19 @@ let editingUserId = null; // 新增：用于标记当前正在编辑的用户
 let selectedGroupId = null; // 当前选中的分组ID
 let cachedData = { groups: [], users: [], questions: [], papers: [], categories: [] };
 
+// ========== 版本控制 ==========
+const AppConfig = {
+    version: '1.0.0', // 当前版本
+    githubRepo: 'hsieh19/exam-system' // GitHub 仓库
+};
+
 document.addEventListener('DOMContentLoaded', async function () {
     const user = Auth.checkAdmin();
     if (user) {
         Auth.updateUserInfo();
         initNavigation();
         checkPermissions();
+        checkVersion(); // 检查版本
         await refreshCache();
         loadGroups();
         loadUsers();
@@ -2620,3 +2627,141 @@ async function confirmClearLogs() {
         showAlert('清理失败: ' + e.message);
     }
 }
+
+// ========== 版本检查逻辑 ==========
+// 比较版本号：v1 > v2 返回 1，v1 < v2 返回 -1，v1 == v2 返回 0
+function compareVersions(v1, v2) {
+    const cleanV1 = v1.replace(/^v/, '');
+    const cleanV2 = v2.replace(/^v/, '');
+
+    const parts1 = cleanV1.split('.').map(Number);
+    const parts2 = cleanV2.split('.').map(Number);
+
+    const maxLength = Math.max(parts1.length, parts2.length);
+
+    for (let i = 0; i < maxLength; i++) {
+        const num1 = parts1[i] || 0;
+        const num2 = parts2[i] || 0;
+
+        if (num1 > num2) return 1;
+        if (num1 < num2) return -1;
+    }
+
+    return 0;
+}
+
+// 检查版本
+async function checkVersion() {
+    const versionEl = document.getElementById('version-info');
+    if (!versionEl) return;
+
+    try {
+        renderVersionInfo(AppConfig.version, false);
+
+        const response = await fetch(`https://api.github.com/repos/${AppConfig.githubRepo}/releases/latest`);
+
+        if (response.ok) {
+            const data = await response.json();
+            const latestVersion = data.tag_name;
+            const hasUpdate = compareVersions(latestVersion, AppConfig.version) > 0;
+
+            renderVersionInfo(latestVersion, hasUpdate, data);
+        }
+    } catch (e) {
+        console.warn('版本检查失败:', e);
+        renderVersionInfo(AppConfig.version, false);
+    }
+}
+
+// 渲染版本信息
+function renderVersionInfo(displayVersion, hasUpdate, releaseData) {
+    const versionEl = document.getElementById('version-info');
+    if (!versionEl) return;
+
+    const currentVerStr = AppConfig.version.startsWith('v') ? AppConfig.version : `v${AppConfig.version}`;
+    const displayVerStr = typeof displayVersion === 'string' ? (displayVersion.startsWith('v') ? displayVersion : `v${displayVersion}`) : (releaseData?.tag_name || currentVerStr);
+
+    if (hasUpdate) {
+        versionEl.innerHTML = `
+            <span style="display:flex;align-items:center;color:var(--warning);" title="发现新版本 ${displayVerStr}">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; animation: pulse 2s infinite;">
+                    <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                </svg>
+                ${currentVerStr}
+                <span class="badge badge-warning" style="margin-left:4px;font-size:10px;padding:2px 4px;">NEW</span>
+            </span>
+        `;
+        versionEl.onclick = () => showVersionDetails(displayVerStr, releaseData, true);
+    } else {
+        versionEl.innerHTML = `
+            <span style="display:flex;align-items:center;" title="当前版本 ${currentVerStr}">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; opacity:0.6;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                ${currentVerStr}
+            </span>
+        `;
+        versionEl.onclick = () => showVersionDetails(currentVerStr, { html_url: `https://github.com/${AppConfig.githubRepo}`, tag_name: currentVerStr }, false);
+    }
+}
+
+// 显示版本详情
+// 显示版本详情
+function showVersionDetails(version, releaseData, isUpdate) {
+    const title = isUpdate ? '系统更新' : '版本信息';
+    const currentVerStr = AppConfig.version.startsWith('v') ? AppConfig.version : `v${AppConfig.version}`;
+    const latestVerStr = releaseData?.tag_name || version;
+    const releaseUrl = releaseData?.html_url || `https://github.com/${AppConfig.githubRepo}`;
+
+    let content = `
+        <div style="padding: 10px 0;">
+            <!-- 版本对比区 -->
+            <div style="display:flex; align-items:stretch; gap:20px; margin-bottom:12px; background:var(--bg-input); padding:24px; border-radius:var(--radius-lg); border:1px solid var(--border);">
+                <div style="flex:1; text-align:center; padding-right:20px; border-right:1px solid var(--border);">
+                    <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; letter-spacing:1px;">当前版本</div>
+                    <div style="font-size:24px; font-weight:700; color:var(--text-primary);">${currentVerStr}</div>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:center; color:var(--text-muted);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </div>
+                <div style="flex:1; text-align:center; padding-left:20px;">
+                    <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; letter-spacing:1px;">最新版本</div>
+                    <div style="font-size:24px; font-weight:700; color:${isUpdate ? 'var(--warning)' : 'var(--success)'};">
+                        ${latestVerStr}
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top:20px; text-align:center;">
+                ${isUpdate ? `
+                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">发现新版本，建议立即更新以获得最新功能。</p>
+                    <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px; justify-content:center;">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        <span>提示：点击下方按钮跳转 GitHub 下载安装包</span>
+                    </div>
+                ` : `
+                    <p style="font-size:14px; color:var(--text-secondary);">您当前已是最新版本，无需更新。</p>
+                `}
+            </div>
+        </div>
+    `;
+
+    const footer = `
+        <button class="btn btn-secondary" onclick="closeModal()">${isUpdate ? '暂不升级' : '关闭'}</button>
+        <a href="${releaseUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:120px;">
+             ${isUpdate ? '立即获取' : '查看项目主页'}
+        </a>
+    `;
+
+    openModal(title, content, footer);
+}
+
