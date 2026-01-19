@@ -40,6 +40,14 @@
         </div>
     </div>
 
+    <script src="js/theme.js"></script>
+    <script>
+        // 考试页面隐藏主题切换器，但保持主题应用
+        document.addEventListener('DOMContentLoaded', () => {
+            const switcher = document.getElementById('theme-switcher');
+            if (switcher) switcher.style.display = 'none';
+        });
+    </script>
     <script src="js/storage.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/auth.js"></script>

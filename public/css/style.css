@@ -52,6 +52,161 @@
   --header-height: 64px;
 }
 
+/* ===========================
+   主题变量 - 浅色主题
+   =========================== */
+[data-theme="light"] {
+  /* 主色调 */
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-light: rgba(59, 130, 246, 0.1);
+
+  /* 背景色 */
+  --bg-dark: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-sidebar: #ffffff;
+  --bg-input: #f1f5f9;
+
+  /* 文字色 */
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+
+  /* 边框和分割线 */
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+
+  /* 状态色 */
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.1);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+/* ===========================
+   主题变量 - 深蓝主题
+   =========================== */
+[data-theme="ocean"] {
+  /* 主色调 */
+  --primary: #06b6d4;
+  --primary-hover: #0891b2;
+  --primary-light: rgba(6, 182, 212, 0.15);
+
+  /* 背景色 */
+  --bg-dark: #0c1929;
+  --bg-card: #132337;
+  --bg-card-hover: #1c3a54;
+  --bg-sidebar: #132337;
+  --bg-input: #0c1929;
+
+  /* 文字色 */
+  --text-primary: #e0f2fe;
+  --text-secondary: #7dd3fc;
+  --text-muted: #38bdf8;
+
+  /* 边框和分割线 */
+  --border: #1e4976;
+  --border-light: #2563a0;
+
+  /* 状态色 */
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.15);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.15);
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.15);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.6);
+}
+
+/* ===========================
+   主题切换器样式
+   =========================== */
+.theme-switcher {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
+  box-shadow: var(--shadow-md);
+  transition: var(--transition);
+}
+
+.theme-switcher:hover {
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
+}
+
+.theme-switcher-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.theme-switcher-select {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 24px 4px 4px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0 center;
+  min-width: 80px;
+}
+
+.theme-switcher-select:focus {
+  outline: none;
+}
+
+.theme-switcher-select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 8px;
+}
+
+/* 登录页主题切换器位置调整 */
+.login-container .theme-switcher {
+  top: 24px;
+  right: 24px;
+}
+
+/* 主内容区主题切换器位置调整 */
+.app-layout .theme-switcher {
+  top: 20px;
+  right: 32px;
+}
+
+/* 平滑的主题过渡动画 */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+html * {
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
 /* 重置和基础样式 */
 *,
 *::before,
