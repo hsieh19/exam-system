@@ -10,6 +10,7 @@ APP_MAIN="src/server.js"
 APP_PORT=3000
 LOG_FILE="out.log"
 PID_FILE="server.pid"
+GITHUB_REPO="hsieh19/exam-system"
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -295,6 +296,125 @@ init_sqlite_db() {
 }
 
 # -------------------------------------------------------
+# 系统更新功能
+# -------------------------------------------------------
+
+get_local_version() {
+    if [ -f "package.json" ]; then
+        grep '"version"' package.json | head -1 | awk -F'"' '{print $4}'
+    else
+        echo "0.0.0"
+    fi
+}
+
+update_app() {
+    echo -e "${BLUE}>>> 检查系统更新...${NC}"
+    
+    # 检查 curl
+    if ! command_exists curl; then
+        echo -e "${RED}错误: 未安装 curl，无法检查更新${NC}"
+        return 1
+    fi
+    
+    # 获取最新版本信息
+    echo "正在获取最新版本信息..."
+    RELEASE_INFO=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest")
+    
+    if [ -z "$RELEASE_INFO" ] || echo "$RELEASE_INFO" | grep -q "Not Found" || echo "$RELEASE_INFO" | grep -q "message"; then
+        if echo "$RELEASE_INFO" | grep -q "rate limit"; then
+            echo -e "${RED}错误: GitHub API 请求频率触发限制，请稍后再试${NC}"
+        else
+            echo -e "${RED}错误: 无法获取版本信息，请检查网络连接或仓库配置${NC}"
+        fi
+        return 1
+    fi
+    
+    # 解析版本号
+    LATEST_VERSION=$(echo "$RELEASE_INFO" | grep '"tag_name"' | head -1 | awk -F'"' '{print $4}')
+    LOCAL_VERSION=$(get_local_version)
+    
+    echo -e "当前版本: ${YELLOW}v${LOCAL_VERSION}${NC}"
+    echo -e "最新版本: ${GREEN}${LATEST_VERSION}${NC}"
+    
+    LATEST_CLEAN=$(echo "$LATEST_VERSION" | sed 's/^v//')
+    if [ "$LOCAL_VERSION" = "$LATEST_CLEAN" ]; then
+        echo -e "${GREEN}当前已是最新版本，无需更新${NC}"
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}发现新版本！是否立即更新？${NC}"
+    echo -e "${RED}警告: 更新将会覆盖现有程序文件 (public/, src/, package.json, run.sh)${NC}"
+    echo -e "${YELLOW}数据库 (db/) 和配置 (.env) 将被保留${NC}"
+    read -p "确认更新? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo "更新已取消"
+        return 0
+    fi
+    
+    TARBALL_URL=$(echo "$RELEASE_INFO" | grep '"tarball_url"' | head -1 | awk -F'"' '{print $4}')
+    
+    if [ -z "$TARBALL_URL" ]; then
+        echo -e "${RED}错误: 无法获取下载链接${NC}"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}>>> 停止服务...${NC}"
+    stop_app
+    
+    BACKUP_DIR="backup_$(date +%Y%m%d_%H%M%S)"
+    echo -e "${YELLOW}>>> 备份当前版本到 ${BACKUP_DIR}...${NC}"
+    mkdir -p "$BACKUP_DIR"
+    [ -d "public" ] && cp -r public "$BACKUP_DIR/"
+    [ -d "src" ] && cp -r src "$BACKUP_DIR/"
+    [ -f "package.json" ] && cp package.json "$BACKUP_DIR/"
+    [ -f "run.sh" ] && cp run.sh "$BACKUP_DIR/"
+    
+    echo -e "${YELLOW}>>> 下载新版本...${NC}"
+    TEMP_DIR=$(mktemp -d)
+    curl -L -o "$TEMP_DIR/release.tar.gz" "$TARBALL_URL"
+    
+    if [ ! -f "$TEMP_DIR/release.tar.gz" ]; then
+        echo -e "${RED}下载失败${NC}"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}>>> 解压更新包...${NC}"
+    tar -xzf "$TEMP_DIR/release.tar.gz" -C "$TEMP_DIR"
+    EXTRACTED_DIR=$(ls -d "$TEMP_DIR"/*/ | head -1)
+    
+    if [ -z "$EXTRACTED_DIR" ]; then
+        echo -e "${RED}解压失败${NC}"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}>>> 更新文件...${NC}"
+    cp -rf "${EXTRACTED_DIR}public" ./
+    cp -rf "${EXTRACTED_DIR}src" ./
+    cp -f "${EXTRACTED_DIR}package.json" ./
+    cp -f "${EXTRACTED_DIR}run.sh" ./
+    
+    rm -rf "$TEMP_DIR"
+    
+    echo -e "${YELLOW}>>> 更新依赖...${NC}"
+    if [ -d "node_modules" ]; then
+        rm -rf node_modules
+    fi
+    npm install --registry=https://registry.npmmirror.com
+    
+    echo -e "${YELLOW}>>> 启动服务...${NC}"
+    start_app
+    
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  系统更新完成! 新版本: ${LATEST_VERSION}${NC}"
+    echo -e "${GREEN}  之前的代码已备份至: ${BACKUP_DIR}${NC}"
+    echo -e "${GREEN}========================================${NC}"
+}
+
+# -------------------------------------------------------
 # 主菜单
 # -------------------------------------------------------
 
@@ -308,6 +428,7 @@ show_menu() {
     echo " 6. 环境部署 (Install Env)"
     echo " 7. 卸载清理 (Uninstall)"
     echo -e " 8. ${YELLOW}初始化数据库 (Init DB)${NC}"
+    echo -e " 9. ${GREEN}系统更新 (Update)${NC}"
     echo " 0. 退出 (Exit)"
     echo -e "${BLUE}================================${NC}"
 }
@@ -315,7 +436,7 @@ show_menu() {
 # 主循环
 while true; do
     show_menu
-    read -p "请输入选项数字 [0-8]: " choice
+    read -p "请输入选项数字 [0-9]: " choice
     case "$choice" in
         1) start_app ;;
         2) stop_app ;;
@@ -325,6 +446,7 @@ while true; do
         6) install_env ;;
         7) uninstall_app ;;
         8) init_sqlite_db ;;
+        9) update_app ;;
         0) echo "再见!"; exit 0 ;;
         *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
     esac

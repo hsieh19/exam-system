@@ -27,3 +27,11 @@ coverage/
 .vscode/
 .idea/
 server.pid
+
+# Archives
+*.tar.gz
+*.zip
+
+# Sensitive files
+server_info.md
+login.md
