@@ -8,7 +8,13 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 const dbConfig = require('../config/db-config');
+
+// 统一 ID 生成函数（使用 UUID v4 确保唯一性）
+const generateId = (prefix = '') => {
+    return prefix + uuidv4().replace(/-/g, '').substring(0, 16);
+};
 
 // 数据库路径
 const isPkg = typeof process.pkg !== 'undefined';
@@ -643,7 +649,7 @@ module.exports = {
         return rows[0];
     },
     addUser: async (user) => {
-        const id = user.id || 'u_' + Date.now();
+        const id = user.id || generateId('u_');
         const hashedPwd = hashPassword(user.password);
         await run("INSERT INTO users (id, username, password, role, groupId) VALUES (?, ?, ?, ?, ?)",
             [id, user.username, hashedPwd, user.role || 'student', user.groupId || null]);
@@ -676,7 +682,7 @@ module.exports = {
     // ==================== 分组相关 ====================
     getGroups: async () => await query("SELECT * FROM groups"),
     addGroup: async (group) => {
-        const id = group.id || 'g_' + Date.now();
+        const id = group.id || generateId('g_');
         await run("INSERT INTO groups (id, name) VALUES (?, ?)", [id, group.name]);
         return { id, ...group };
     },
@@ -713,7 +719,7 @@ module.exports = {
         }));
     },
     addQuestion: async (q) => {
-        const id = q.id || 'q_' + Date.now();
+        const id = q.id || generateId('q_');
         const now = new Date().toISOString();
         await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, now]);
@@ -769,7 +775,7 @@ module.exports = {
         };
     },
     addPaper: async (paper) => {
-        const id = paper.id || 'p_' + Date.now();
+        const id = paper.id || generateId('p_');
         await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline, groupId, creatorId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
                 paper.createDate || new Date().toISOString().split('T')[0],
@@ -807,7 +813,7 @@ module.exports = {
         }));
     },
     addRecord: async (record) => {
-        const id = record.id || 'r_' + Date.now();
+        const id = record.id || generateId('r_');
         await run("INSERT INTO records (id, paperId, userId, score, totalTime, answers, submitDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [id, record.paperId, record.userId, record.score, record.totalTime,
                 JSON.stringify(record.answers || {}), new Date().toISOString()]);
@@ -820,7 +826,7 @@ module.exports = {
 
     // ==================== 推送记录相关 ====================
     addPushLog: async (log) => {
-        const id = log.id || 'pl_' + Date.now();
+        const id = log.id || generateId('pl_');
         await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?)",
             [id, log.paperId, JSON.stringify(log.targetGroups || []), JSON.stringify(log.targetUsers || []),
                 log.deadline || null, new Date().toISOString()]);
@@ -840,7 +846,7 @@ module.exports = {
     getMajors: async () => await query("SELECT * FROM categories WHERE type = 'major'"),
     getDeviceTypes: async (majorId) => await query("SELECT * FROM categories WHERE type = 'device' AND parentId = ?", [majorId]),
     addCategory: async (cat) => {
-        const id = cat.id || 'cat_' + Date.now();
+        const id = cat.id || generateId('cat_');
         await run("INSERT INTO categories (id, name, type, parentId) VALUES (?, ?, ?, ?)",
             [id, cat.name, cat.type, cat.parentId || null]);
         return { id, ...cat };
@@ -856,12 +862,12 @@ module.exports = {
 
     // ==================== 系统日志相关 ====================
     addSystemLog: async (log) => {
-        const id = log.id || 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const id = log.id || generateId('log_');
         const createdAt = new Date().toISOString();
         await run(
             "INSERT INTO system_logs (id, action, target, targetId, userId, username, details, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [id, log.action, log.target, log.targetId || null, log.userId || null, log.username || null, 
-             JSON.stringify(log.details || {}), log.ip || null, createdAt]
+            [id, log.action, log.target, log.targetId || null, log.userId || null, log.username || null,
+                JSON.stringify(log.details || {}), log.ip || null, createdAt]
         );
         return { id, ...log, createdAt };
     },

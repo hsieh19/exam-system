@@ -1,9 +1,20 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const db = require('./db/db-adapter');
 const dbConfig = require('./config/db-config');
+
+// 统一 ID 生成函数
+const generateId = (prefix = '') => {
+    return prefix + uuidv4().replace(/-/g, '').substring(0, 16);
+};
+
+// Session 配置
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24小时过期
+const SESSION_CLEANUP_INTERVAL = 60 * 60 * 1000; // 每小时清理一次
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,7 +34,33 @@ async function startServer() {
     console.log('数据库初始化完成');
 
     // ==================== 认证中间件 ====================
-    const sessions = new Map(); // token -> user
+    // sessions 存储结构: token -> { user, expiresAt }
+    const sessions = new Map();
+
+    // 生成安全 Token
+    const generateSecureToken = () => {
+        return crypto.randomBytes(32).toString('hex');
+    };
+
+    // 检查 Session 是否有效
+    const isSessionValid = (session) => {
+        return session && session.expiresAt > Date.now();
+    };
+
+    // 定时清理过期 Session
+    setInterval(() => {
+        const now = Date.now();
+        let cleanedCount = 0;
+        for (const [token, session] of sessions.entries()) {
+            if (session.expiresAt <= now) {
+                sessions.delete(token);
+                cleanedCount++;
+            }
+        }
+        if (cleanedCount > 0) {
+            console.log(`已清理 ${cleanedCount} 个过期会话`);
+        }
+    }, SESSION_CLEANUP_INTERVAL);
 
     const authMiddleware = (req, res, next) => {
         // 白名单
@@ -33,9 +70,16 @@ async function startServer() {
         if (!authHeader) return res.status(401).json({ error: '未登录或登录已过期' });
 
         const token = authHeader.split(' ')[1];
-        if (!token || !sessions.has(token)) return res.status(401).json({ error: '无效的令牌' });
+        const session = sessions.get(token);
 
-        req.user = sessions.get(token);
+        if (!token || !isSessionValid(session)) {
+            // 清理无效 Token
+            if (token) sessions.delete(token);
+            return res.status(401).json({ error: '无效的令牌或会话已过期' });
+        }
+
+        req.user = session.user;
+        req.token = token; // 保存 token 以便续期
         next();
     };
 
@@ -171,7 +215,7 @@ async function startServer() {
             userData.role = 'student';
             userData.groupId = req.user.groupId;
         }
-        const user = { id: 'u_' + Date.now(), ...userData };
+        const user = { id: generateId('u_'), ...userData };
         const result = await db.addUser(user);
         // 记录日志
         await logAction('create', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
@@ -238,12 +282,13 @@ async function startServer() {
         const clientIp = getClientIp(req);
         const user = await db.login(username, password);
         if (user) {
-            // 生成 Token
-            const token = 'tk_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-            sessions.set(token, user);
+            // 生成安全 Token
+            const token = generateSecureToken();
+            const expiresAt = Date.now() + SESSION_EXPIRY_MS;
+            sessions.set(token, { user, expiresAt });
             // 记录登录成功日志
             await logAction('login', 'user', user.id, user, { username }, clientIp);
-            res.json({ token, user });
+            res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
         } else {
             // 记录登录失败日志
             await logAction('login_failed', 'user', null, null, { username }, clientIp);
@@ -268,7 +313,7 @@ async function startServer() {
     });
 
     app.post('/api/groups', superAdminMiddleware, async (req, res) => {
-        const group = { id: 'g_' + Date.now(), ...req.body };
+        const group = { id: generateId('g_'), ...req.body };
         res.json(await db.addGroup(group));
     });
 
@@ -298,7 +343,7 @@ async function startServer() {
         if (req.user.role !== 'super_admin') {
             questionData.groupId = req.user.groupId;
         }
-        const question = { id: 'q_' + Date.now(), ...questionData };
+        const question = { id: generateId('q_'), ...questionData };
         const result = await db.addQuestion(question);
         await logAction('create', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
         res.json(result);
@@ -355,7 +400,7 @@ async function startServer() {
     });
 
     app.post('/api/categories', superAdminMiddleware, async (req, res) => {
-        const cat = { id: 'cat_' + Date.now(), ...req.body };
+        const cat = { id: generateId('cat_'), ...req.body };
         res.json(await db.addCategory(cat));
     });
 
@@ -394,7 +439,7 @@ async function startServer() {
 
     app.post('/api/papers', adminMiddleware, async (req, res) => {
         const paper = {
-            id: 'p_' + Date.now(),
+            id: generateId('p_'),
             createDate: new Date().toISOString().split('T')[0],
             creatorId: req.user.id,
             groupId: req.user.groupId,
@@ -458,7 +503,7 @@ async function startServer() {
 
         // 记录推送日志
         await db.addPushLog({
-            id: 'pl_' + Date.now(),
+            id: generateId('pl_'),
             paperId: req.params.id,
             pushTime,
             targetGroups,
@@ -541,7 +586,7 @@ async function startServer() {
 
     app.post('/api/records', async (req, res) => {
         // 确保用户只能为自己提交记录
-        const record = { id: 'r_' + Date.now(), ...req.body, userId: req.user.id };
+        const record = { id: generateId('r_'), ...req.body, userId: req.user.id };
         res.json(await db.addRecord(record));
     });
 

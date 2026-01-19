@@ -35,3 +35,8 @@ server.pid
 # Sensitive files
 server_info.md
 login.md
+
+# Backup files
+*.bak
+*.backup
+*.orig
