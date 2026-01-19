@@ -2717,47 +2717,41 @@ function showVersionDetails(version, releaseData, isUpdate) {
     const releaseUrl = releaseData?.html_url || `https://github.com/${AppConfig.githubRepo}`;
 
     let content = `
-        <div style="padding: 10px 0;">
+        <div style="padding: 8px 0;">
             <!-- 版本对比区 -->
-            <div style="display:flex; align-items:stretch; gap:20px; margin-bottom:12px; background:var(--bg-input); padding:24px; border-radius:var(--radius-lg); border:1px solid var(--border);">
-                <div style="flex:1; text-align:center; padding-right:20px; border-right:1px solid var(--border);">
-                    <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; letter-spacing:1px;">当前版本</div>
-                    <div style="font-size:24px; font-weight:700; color:var(--text-primary);">${currentVerStr}</div>
+            <div style="display:flex; align-items:center; justify-content:center; gap:0; margin-bottom:24px; background:var(--bg-input); padding:24px; border-radius:var(--radius-lg); border:1px solid var(--border);">
+                <div style="text-align:center; min-width:140px;">
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.5px; opacity:0.8;">当前版本</div>
+                    <div style="font-size:26px; font-weight:700; color:var(--text-primary); font-family:'Inter', sans-serif;">${currentVerStr}</div>
                 </div>
-                <div style="display:flex; align-items:center; justify-content:center; color:var(--text-muted);">
-                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="9 18 15 12 9 6"></polyline>
+                
+                <div style="display:flex; align-items:center; padding:0 32px; color:var(--text-muted);">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity:0.3;">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
                     </svg>
                 </div>
-                <div style="flex:1; text-align:center; padding-left:20px;">
-                    <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; letter-spacing:1px;">最新版本</div>
-                    <div style="font-size:24px; font-weight:700; color:${isUpdate ? 'var(--warning)' : 'var(--success)'};">
+
+                <div style="text-align:center; min-width:140px;">
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px; letter-spacing:0.5px; opacity:0.8;">最新版本</div>
+                    <div style="font-size:26px; font-weight:700; color:${isUpdate ? 'var(--warning)' : 'var(--success)'}; font-family:'Inter', sans-serif;">
                         ${latestVerStr}
                     </div>
                 </div>
             </div>
             
-            <div style="margin-top:20px; text-align:center;">
+            <div style="text-align:center; padding:0 10px;">
                 ${isUpdate ? `
-                    <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">发现新版本，建议立即更新以获得最新功能。</p>
-                    <div style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px; justify-content:center;">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="12" y1="16" x2="12" y2="12"></line>
-                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                        </svg>
-                        <span>提示：点击下方按钮跳转 GitHub 下载安装包</span>
-                    </div>
+                    <div style="font-size:14px; color:var(--text-secondary);">发现新版本，建议立即更新以体验最新功能与优化。</div>
                 ` : `
-                    <p style="font-size:14px; color:var(--text-secondary);">您当前已是最新版本，无需更新。</p>
+                    <div style="font-size:14px; color:var(--text-secondary);">已是最新版本，当前系统版本状态良好，无需更新。</div>
                 `}
             </div>
         </div>
     `;
 
     const footer = `
-        <button class="btn btn-secondary" onclick="closeModal()">${isUpdate ? '暂不升级' : '关闭'}</button>
-        <a href="${releaseUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:120px;">
+        <button class="btn btn-secondary" style="padding:8px 20px; font-size:14px; height:38px;" onclick="closeModal()">${isUpdate ? '暂不升级' : '关闭'}</button>
+        <a href="${releaseUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:100px; padding:8px 22px; font-size:14px; height:38px;">
              ${isUpdate ? '立即获取' : '查看项目主页'}
         </a>
     `;
