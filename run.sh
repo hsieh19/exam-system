@@ -449,6 +449,10 @@ update_app() {
     [ -f "package.json" ] && cp package.json "$BACKUP_DIR/"
     [ -f "run.sh" ] && cp run.sh "$BACKUP_DIR/"
     
+    # 清理旧备份 (只保留最近 1 个)
+    # 列出所有backup_开头目录，按时间排序，跳过最新的1个，删除其余的
+    ls -dt backup_* 2>/dev/null | tail -n +2 | xargs rm -rf
+    
     echo -e "${YELLOW}>>> 下载新版本...${NC}"
     TEMP_DIR=$(mktemp -d)
     curl -L -o "$TEMP_DIR/release.tar.gz" "$TARBALL_URL"
@@ -499,6 +503,68 @@ update_app() {
     echo -e "${GREEN}========================================${NC}"
 }
 
+restore_app() {
+    echo -e "${BLUE}>>> 准备系统还原...${NC}"
+    
+    # 查找最近的备份目录
+    LATEST_BACKUP=$(ls -td backup_* 2>/dev/null | head -1)
+    
+    if [ -z "$LATEST_BACKUP" ]; then
+        echo -e "${RED}错误: 未找到任何备份目录 (backup_*)${NC}"
+        return 1
+    fi
+    
+    echo -e "发现最近备份: ${YELLOW}${LATEST_BACKUP}${NC}"
+    echo -e "${RED}警告: 此操作将用备份文件覆盖当前系统！${NC}"
+    echo -e "${YELLOW}数据库 (db/) 和配置 (.env) 不会受到影响。${NC}"
+    
+    read -p "确认还原? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo "还原已取消"
+        return 0
+    fi
+    
+    echo -e "${YELLOW}>>> 停止服务...${NC}"
+    stop_app
+    
+    echo -e "${YELLOW}>>> 正在从 ${LATEST_BACKUP} 恢复文件...${NC}"
+    
+    # 恢复文件
+    if [ -d "${LATEST_BACKUP}/public" ]; then
+        rm -rf public
+        cp -r "${LATEST_BACKUP}/public" ./
+    fi
+    
+    if [ -d "${LATEST_BACKUP}/src" ]; then
+        rm -rf src
+        cp -r "${LATEST_BACKUP}/src" ./
+    fi
+    
+    if [ -f "${LATEST_BACKUP}/package.json" ]; then
+        cp "${LATEST_BACKUP}/package.json" ./
+    fi
+    
+    # 注意：通常还原功能本身就在 run.sh 中运行，直接覆盖运行中的脚本可能有风险。
+    # 但由于是 shell 脚本，通常只要不修改正在执行的函数段就没事。
+    if [ -f "${LATEST_BACKUP}/run.sh" ]; then
+        cp "${LATEST_BACKUP}/run.sh" ./
+    fi
+    
+    echo -e "${YELLOW}>>> 还原依赖...${NC}"
+    if [ -d "node_modules" ]; then
+        rm -rf node_modules
+    fi
+    npm install --registry=https://registry.npmmirror.com
+    
+    echo -e "${YELLOW}>>> 启动服务...${NC}"
+    start_app
+    
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  系统已还原至备份状态!${NC}"
+    echo -e "${GREEN}========================================${NC}"
+}
+
 # -------------------------------------------------------
 # 主菜单
 # -------------------------------------------------------
@@ -514,6 +580,7 @@ show_menu() {
     echo " 7. 卸载清理 (Uninstall)"
     echo -e " 8. ${YELLOW}初始化数据库 (Init DB)${NC}"
     echo -e " 9. ${GREEN}系统更新 (Update)${NC}"
+    echo -e " 10. ${BLUE}系统还原 (Restore)${NC}"
     echo " 0. 退出 (Exit)"
     echo -e "${BLUE}================================${NC}"
 }
@@ -521,7 +588,7 @@ show_menu() {
 # 主循环
 while true; do
     show_menu
-    read -p "请输入选项数字 [0-9]: " choice
+    read -p "请输入选项数字: " choice
     case "$choice" in
         1) start_app ;;
         2) stop_app ;;
@@ -532,6 +599,7 @@ while true; do
         7) uninstall_app ;;
         8) init_sqlite_db ;;
         9) update_app ;;
+        10) restore_app ;;
         0) echo "再见!"; exit 0 ;;
         *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
     esac
