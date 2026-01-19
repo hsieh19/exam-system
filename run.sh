@@ -229,6 +229,72 @@ uninstall_app() {
 }
 
 # -------------------------------------------------------
+# 数据库初始化功能
+# -------------------------------------------------------
+
+init_sqlite_db() {
+    echo -e "${RED}╔═══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║           ⚠️  警告: 危险操作 ⚠️                       ║${NC}"
+    echo -e "${RED}╚═══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "此操作将${RED}删除现有的 SQLite 数据库${NC}并重新初始化。"
+    echo -e "以下数据将${RED}永久丢失${NC}:"
+    echo "  • 所有用户账号"
+    echo "  • 所有题库数据"
+    echo "  • 所有试卷配置"
+    echo "  • 所有考试记录"
+    echo "  • 所有系统日志"
+    echo ""
+    
+    # 第一次确认
+    read -p "确定要初始化数据库吗? (输入 y 继续): " confirm1
+    if [[ "$confirm1" != "y" ]]; then
+        echo -e "${GREEN}操作已取消${NC}"
+        return
+    fi
+    
+    # 第二次确认 (要求输入特定文字)
+    echo ""
+    echo -e "${YELLOW}【二次确认】请输入 'INIT' 以确认初始化操作:${NC}"
+    read -p "> " confirm2
+    if [[ "$confirm2" != "INIT" ]]; then
+        echo -e "${GREEN}输入不匹配，操作已取消${NC}"
+        return
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}>>> 正在初始化数据库...${NC}"
+    
+    # 检查数据库文件是否存在
+    DB_FILE="db/exam.db"
+    if [ -f "$DB_FILE" ]; then
+        # 备份旧数据库
+        BACKUP_FILE="db/exam_backup_$(date +%Y%m%d_%H%M%S).db"
+        echo "正在备份现有数据库到: $BACKUP_FILE"
+        cp "$DB_FILE" "$BACKUP_FILE"
+        
+        # 删除现有数据库
+        echo "正在删除现有数据库..."
+        rm "$DB_FILE"
+    fi
+    
+    # 重启服务以重新初始化数据库
+    if [ -f "$PID_FILE" ]; then
+        echo "正在重启服务以初始化新数据库..."
+        stop_app
+        sleep 1
+        start_app
+        echo ""
+        echo -e "${GREEN}>>> 数据库初始化完成!${NC}"
+        echo -e "${GREEN}默认管理员账号: admin / admin123${NC}"
+    else
+        echo -e "${GREEN}>>> 数据库文件已清除${NC}"
+        echo -e "${YELLOW}请启动服务以自动初始化新数据库${NC}"
+        echo -e "启动后默认管理员账号: admin / admin123"
+    fi
+}
+
+# -------------------------------------------------------
 # 主菜单
 # -------------------------------------------------------
 
@@ -241,14 +307,15 @@ show_menu() {
     echo " 5. 查看日志 (Logs)"
     echo " 6. 环境部署 (Install Env)"
     echo " 7. 卸载清理 (Uninstall)"
+    echo -e " 8. ${YELLOW}初始化数据库 (Init DB)${NC}"
     echo " 0. 退出 (Exit)"
-    echo -e "${BLUE}==============================${NC}"
+    echo -e "${BLUE}================================${NC}"
 }
 
 # 主循环
 while true; do
     show_menu
-    read -p "请输入选项数字 [0-7]: " choice
+    read -p "请输入选项数字 [0-8]: " choice
     case "$choice" in
         1) start_app ;;
         2) stop_app ;;
@@ -257,6 +324,7 @@ while true; do
         5) view_logs ;;
         6) install_env ;;
         7) uninstall_app ;;
+        8) init_sqlite_db ;;
         0) echo "再见!"; exit 0 ;;
         *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
     esac
