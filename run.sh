@@ -138,15 +138,45 @@ start_app() {
     new_pid=$!
     echo "$new_pid" > "$PID_FILE"
     
-    sleep 1
-    if ps -p "$new_pid" > /dev/null 2>&1; then
-        echo -e "${GREEN}服务启动成功!${NC}"
-        echo -e "PID: ${GREEN}$new_pid${NC}"
-        echo -e "访问地址: http://localhost:$APP_PORT"
-        echo -e "日志文件: $LOG_FILE"
-    else
-        echo -e "${RED}启动失败，请查看日志: $LOG_FILE${NC}"
-    fi
+    # 循环检查服务状态 (最多等待 10 秒)
+    echo "正在等待服务启动..."
+    for i in {1..10}; do
+        sleep 1
+        # 1. 检查进程是否存活
+        if ! ps -p "$new_pid" > /dev/null 2>&1; then
+            echo -e "${RED}启动失败: 进程已退出${NC}"
+            echo -e "请查看日志: cat $LOG_FILE"
+            rm "$PID_FILE"
+            return 1
+        fi
+        
+        # 2. 检查日志是否有报错 (可选)
+        if grep -q "Error:" "$LOG_FILE"; then
+             echo -e "${RED}启动检测到错误日志${NC}"
+             # 不立即退出，可能只是打印错误但仍在运行，交由人工判断或继续观察
+        fi
+
+        # 3. 检查端口是否被监听 (如果安装了 netstat/ss)
+        if command_exists netstat; then
+             if netstat -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
+                 echo -e "${GREEN}服务启动成功! (端口 $APP_PORT 已监听)${NC}"
+                 echo -e "PID: ${GREEN}$new_pid${NC}"
+                 echo -e "访问地址: http://localhost:$APP_PORT"
+                 return 0
+             fi
+        elif command_exists ss; then
+             if ss -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
+                 echo -e "${GREEN}服务启动成功! (端口 $APP_PORT 已监听)${NC}"
+                 echo -e "PID: ${GREEN}$new_pid${NC}"
+                 echo -e "访问地址: http://localhost:$APP_PORT"
+                 return 0
+             fi
+        fi
+    done
+    
+    # 如果10秒后进程还在但端口未检测到(或无工具检测)，认为勉强成功
+    echo -e "${GREEN}服务已启动 (PID: $new_pid)，请手动验证端口是否连通${NC}"
+    echo -e "日志文件: $LOG_FILE"
 }
 
 stop_app() {
@@ -403,6 +433,12 @@ update_app() {
         rm -rf node_modules
     fi
     npm install --registry=https://registry.npmmirror.com
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}依赖安装失败，尝试恢复备份...${NC}"
+        echo -e "${YELLOW}请检查网络或配置，然后尝试手动运行: npm install${NC}"
+        echo -e "${YELLOW}之前的代码备份在: ${BACKUP_DIR}${NC}"
+        return 1
+    fi
     
     echo -e "${YELLOW}>>> 启动服务...${NC}"
     start_app
