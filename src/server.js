@@ -6,7 +6,8 @@ const db = require('./db/db-adapter');
 const dbConfig = require('./config/db-config');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
 
 // 文件上传配置
 const upload = multer({ storage: multer.memoryStorage() });
@@ -614,8 +615,11 @@ async function startServer() {
         res.json({ success: true });
     });
 
-    app.listen(PORT, () => {
-        console.log(`考试系统服务器已启动: http://localhost:${PORT}`);
+    app.listen(PORT, HOST, () => {
+        console.log(`考试系统服务器已启动: http://${HOST === '0.0.0.0' ? '服务器IP' : HOST}:${PORT}`);
+        if (HOST === '0.0.0.0') {
+            console.log('提示: 服务已绑定到所有网络接口，可从外部访问');
+        }
     });
 }
 
