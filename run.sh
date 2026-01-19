@@ -180,21 +180,47 @@ start_app() {
 }
 
 stop_app() {
-    if [ ! -f "$PID_FILE" ]; then
-        echo -e "${YELLOW}未检测到运行中的服务${NC}"
+    local pid=""
+    
+    # 1. 尝试从 PID 文件获取
+    if [ -f "$PID_FILE" ]; then
+        pid=$(cat "$PID_FILE")
+    fi
+    
+    # 2. 如果 PID 文件无效，尝试从端口获取 (Linux/Mac)
+    if [ -z "$pid" ] || ! ps -p "$pid" > /dev/null 2>&1; then
+        if command_exists lsof; then
+            pid=$(lsof -t -i:$APP_PORT)
+        elif command_exists netstat; then
+            pid=$(netstat -nlp | grep ":$APP_PORT " | awk '{print $7}' | awk -F'/' '{print $1}')
+        fi
+    fi
+    
+    if [ -z "$pid" ]; then
+        echo -e "${YELLOW}未检测到运行中的服务 (端口 $APP_PORT 空闲)${NC}"
+        [ -f "$PID_FILE" ] && rm "$PID_FILE"
         return
     fi
     
-    target_pid=$(cat "$PID_FILE")
-    if ps -p "$target_pid" > /dev/null 2>&1; then
-        echo "正在停止服务 (PID: $target_pid)..."
-        kill "$target_pid"
-        rm "$PID_FILE"
-        echo -e "${GREEN}服务已停止${NC}"
-    else
-        echo "清理无效的 PID 文件"
-        rm "$PID_FILE"
+    echo "正在停止服务 (PID: $pid)..."
+    kill "$pid" 2>/dev/null
+    
+    # 等待进程退出
+    for i in {1..5}; do
+        if ! ps -p "$pid" > /dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    
+    # 强制杀死
+    if ps -p "$pid" > /dev/null 2>&1; then
+        echo "服务未响应，强制停止..."
+        kill -9 "$pid" 2>/dev/null
     fi
+
+    [ -f "$PID_FILE" ] && rm "$PID_FILE"
+    echo -e "${GREEN}服务已停止${NC}"
 }
 
 restart_app() {
@@ -204,16 +230,39 @@ restart_app() {
 }
 
 status_app() {
-    if [ -f "$PID_FILE" ]; then
-        target_pid=$(cat "$PID_FILE")
-        if ps -p "$target_pid" > /dev/null 2>&1; then
-            echo -e "${GREEN}● 服务运行中${NC}"
-            echo "   PID: $target_pid"
-            echo "   端口: $APP_PORT"
-            return
+    local is_running=false
+    local pid=""
+    
+    # 1. 端口检测 (最准确)
+    if command_exists netstat; then
+        if netstat -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
+            is_running=true
+        fi
+    elif command_exists ss; then
+        if ss -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
+            is_running=true
+        fi
+    elif command_exists lsof; then
+        if lsof -i:$APP_PORT >/dev/null 2>&1; then
+            is_running=true
         fi
     fi
-    echo -e "${RED}● 服务未运行${NC}"
+    
+    # 2. PID 文件辅助检查
+    if [ "$is_running" = false ] && [ -f "$PID_FILE" ]; then
+        pid=$(cat "$PID_FILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            is_running=true
+        fi
+    fi
+
+    if [ "$is_running" = true ]; then
+        echo -e "${GREEN}● 服务运行中${NC}"
+        echo "   端口: $APP_PORT"
+        [ -n "$pid" ] && echo "   PID: $pid"
+    else
+        echo -e "${RED}● 服务未运行${NC}"
+    fi
 }
 
 view_logs() {

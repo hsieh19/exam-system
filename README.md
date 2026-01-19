@@ -45,6 +45,9 @@
 
 2.  **初始化与运行**：
     ```bash
+    # 如果脚本无法运行或报错 /bin/bash^M: bad interpreter，请先执行：
+    sed -i 's/\r$//' run.sh
+    
     chmod +x run.sh   # 赋予脚本执行权限
     ./run.sh
     ```
