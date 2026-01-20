@@ -72,16 +72,16 @@ manage_autostart() {
 
     if [ "$action" == "enable" ]; then
         # 先清除旧的，再添加新的 (防止重复)
-        (crontab -l 2>/dev/null | grep -v "run.sh start"; echo "$cron_job") | crontab -
+        (crontab -l 2>/dev/null | grep -E -v "run.sh.*start"; echo "$cron_job") | crontab -
     elif [ "$action" == "disable" ]; then
-        (crontab -l 2>/dev/null | grep -v "run.sh start") | crontab -
+        (crontab -l 2>/dev/null | grep -E -v "run.sh.*start") | crontab -
     fi
 }
 
 # 检查当前是否已开启自启
 is_autostart_enabled() {
     if ! check_cron_exists; then return 1; fi
-    crontab -l 2>/dev/null | grep -q "run.sh start"
+    crontab -l 2>/dev/null | grep -E -q "run.sh.*start"
     return $?
 }
 
