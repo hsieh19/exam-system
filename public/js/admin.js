@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         await refreshCache();
         loadGroups();
         loadUsers();
+        ensureQuestionsFab();
+        updateQuestionFabVisibility();
     }
 });
 
@@ -64,6 +66,7 @@ function initNavigation() {
                 this.classList.add('active');
                 document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
                 document.getElementById(`page-${page}`).classList.remove('hidden');
+                updateQuestionFabVisibility();
 
                 // 简单的防抖/节流：如果是快速切换，可能不需要每次都 refreshCache
                 // 但为了数据实时性，这里每次请求。结合后端的 304 缓存，其实开销很小。
@@ -96,6 +99,78 @@ function initNavigation() {
             document.getElementById('btn-clear-records').style.display = 'none';
         }
     });
+}
+
+let questionsFabRoot = null;
+
+function ensureQuestionsFab() {
+    if (questionsFabRoot) return;
+    questionsFabRoot = document.createElement('div');
+    questionsFabRoot.className = 'questions-fab-root';
+    questionsFabRoot.innerHTML = `
+        <div class="questions-fab-menu" role="menu" aria-label="题库操作">
+            <button type="button" class="questions-fab-item questions-fab-item--entry" data-action="add-single">录入单选题</button>
+            <button type="button" class="questions-fab-item questions-fab-item--entry" data-action="add-multiple">录入多选题</button>
+            <button type="button" class="questions-fab-item questions-fab-item--entry" data-action="add-judge">录入判断题</button>
+            <button type="button" class="questions-fab-item questions-fab-item--settings" data-action="category">设置专业</button>
+            <button type="button" class="questions-fab-item questions-fab-item--data" data-action="import">导入题库</button>
+            <button type="button" class="questions-fab-item questions-fab-item--data" data-action="export">导出题库</button>
+        </div>
+        <button type="button" class="questions-fab" aria-label="题库操作">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+        </button>
+    `;
+    document.body.appendChild(questionsFabRoot);
+
+    const fabBtn = questionsFabRoot.querySelector('.questions-fab');
+    fabBtn?.addEventListener('click', () => {
+        questionsFabRoot.classList.toggle('open');
+    });
+
+    questionsFabRoot.addEventListener('click', (e) => {
+        const btn = e.target.closest?.('button[data-action]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        questionsFabRoot.classList.remove('open');
+
+        if (action === 'add-single') showAddQuestion('single');
+        else if (action === 'add-multiple') showAddQuestion('multiple');
+        else if (action === 'add-judge') showAddQuestion('judge');
+        else if (action === 'category') showCategorySettings();
+        else if (action === 'import') handleImportClick();
+        else if (action === 'export') exportQuestions();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!questionsFabRoot) return;
+        if (questionsFabRoot.classList.contains('open') && !questionsFabRoot.contains(e.target)) {
+            questionsFabRoot.classList.remove('open');
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!questionsFabRoot) return;
+        if (e.key === 'Escape') questionsFabRoot.classList.remove('open');
+    });
+
+    window.addEventListener('resize', () => {
+        updateQuestionFabVisibility();
+    });
+}
+
+function updateQuestionFabVisibility() {
+    if (!questionsFabRoot) return;
+    const questionsPage = document.getElementById('page-questions');
+    const isQuestionsActive = !!questionsPage && !questionsPage.classList.contains('hidden');
+    const isMobile = window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : (window.innerWidth <= 768);
+    if (isQuestionsActive && isMobile) questionsFabRoot.classList.add('visible');
+    else {
+        questionsFabRoot.classList.remove('visible');
+        questionsFabRoot.classList.remove('open');
+    }
 }
 
 // ========== 模态框 ==========
@@ -216,7 +291,7 @@ function renderUsers() {
         users = users.filter(u => u.groupId === selectedGroupId);
     }
 
-    const html = users.length ? `<table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th style="text-align:center;width:340px;">操作</th></tr></thead>
+    const html = users.length ? `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="text-center user-actions-header">操作</th></tr></thead>
     <tbody>${users.map(u => {
         const isSuper = u.role === 'super_admin';
         const isGroupAdmin = u.role === 'group_admin';
@@ -238,8 +313,8 @@ function renderUsers() {
             ${roleBadge}
         </td>
         <td>${escapeHtml(getGroupName(u.groupId))}</td>
-        <td style="text-align:center;">
-          <div style="display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:nowrap;white-space:nowrap;">
+        <td class="text-center">
+          <div class="user-actions">
             ${canManageRole ? `
                 <button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>
                 <button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>
@@ -248,7 +323,7 @@ function renderUsers() {
             ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>` : ''}
           </div>
         </td></tr>`;
-    }).join('')}</tbody></table>` : '<p class="text-muted">暂无用户</p>';
+    }).join('')}</tbody></table></div>` : '<p class="text-muted">暂无用户</p>';
     document.getElementById('users-list').innerHTML = html;
 }
 
@@ -2488,28 +2563,16 @@ function renderSystemLogs(logs) {
         'clear': 'background:#64748b;color:white;'
     };
 
-    const html = `
-        <div class="table-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th style="width:160px;">时间</th>
-                        <th style="width:100px;">操作</th>
-                        <th style="width:80px;">对象</th>
-                        <th style="width:120px;">操作者</th>
-                        <th>详情</th>
-                        <th style="width:120px;">IP地址</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${logs.map(log => {
+    const rows = logs.map(log => {
         const time = new Date(log.createdAt).toLocaleString('zh-CN');
         const actionLabel = actionLabels[log.action] || log.action;
         const targetLabel = targetLabels[log.target] || log.target;
         const actionStyle = actionStyles[log.action] || 'background:#94a3b8;color:white;';
 
-        let detailsStr = '';
-        if (log.details && typeof log.details === 'object') {
+        let detailsStr = '-';
+        if (typeof log.details === 'string') {
+            detailsStr = log.details.trim() || '-';
+        } else if (log.details && typeof log.details === 'object') {
             const parts = [];
             if (log.details.username) parts.push('用户名: ' + log.details.username);
             if (log.details.name) parts.push('名称: ' + log.details.name);
@@ -2518,21 +2581,70 @@ function renderSystemLogs(logs) {
             if (log.details.dbType) parts.push('数据库: ' + log.details.dbType);
             if (log.details.beforeDate) parts.push('清理日期: ' + log.details.beforeDate);
             detailsStr = parts.join(', ') || '-';
+        } else if (log.details !== null && log.details !== undefined) {
+            detailsStr = String(log.details);
         }
 
-        return `
+        const ip = log.ip || '-';
+        const username = log.username || '-';
+
+        return {
+            time,
+            actionLabel,
+            targetLabel,
+            actionStyle,
+            detailsStr,
+            ip,
+            username
+        };
+    });
+
+    const html = `
+        <div class="logs-table">
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:160px;">时间</th>
+                            <th style="width:100px;">操作</th>
+                            <th style="width:80px;">对象</th>
+                            <th style="width:120px;">操作者</th>
+                            <th>详情</th>
+                            <th style="width:120px;">IP地址</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(r => `
                             <tr>
-                                <td style="font-size:13px;color:var(--text-secondary);">${time}</td>
-                                <td><span class="badge" style="${actionStyle}font-size:11px;padding:3px 8px;border-radius:4px;">${escapeHtml(actionLabel)}</span></td>
-                                <td style="font-size:13px;">${escapeHtml(targetLabel)}</td>
-                                <td style="font-size:13px;">${escapeHtml(log.username || '-')}</td>
-                                <td style="font-size:13px;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(detailsStr)}">${escapeHtml(detailsStr)}</td>
-                                <td style="font-size:12px;color:var(--text-muted);font-family:monospace;">${escapeHtml(log.ip || '-')}</td>
+                                <td style="font-size:13px;color:var(--text-secondary);">${escapeHtml(r.time)}</td>
+                                <td><span class="badge" style="${r.actionStyle}font-size:11px;padding:3px 8px;border-radius:4px;">${escapeHtml(r.actionLabel)}</span></td>
+                                <td style="font-size:13px;">${escapeHtml(r.targetLabel)}</td>
+                                <td style="font-size:13px;">${escapeHtml(r.username)}</td>
+                                <td style="font-size:13px;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.detailsStr)}">${escapeHtml(r.detailsStr)}</td>
+                                <td style="font-size:12px;color:var(--text-muted);font-family:monospace;">${escapeHtml(r.ip)}</td>
                             </tr>
-                        `;
-    }).join('')}
-                </tbody>
-            </table>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="logs-cards">
+            ${rows.map(r => `
+                <div class="log-card">
+                    <div class="log-card-top">
+                        <span class="log-card-action" style="${r.actionStyle}">${escapeHtml(r.actionLabel)}</span>
+                        <span class="log-card-operator">${escapeHtml(r.username)}</span>
+                    </div>
+                    <div class="log-card-middle">
+                        <span class="log-card-target">${escapeHtml(r.targetLabel)}</span>
+                        <span class="log-card-details">${escapeHtml(r.detailsStr)}</span>
+                    </div>
+                    <div class="log-card-bottom">
+                        <span>${escapeHtml(r.time)}</span>
+                        <span>${escapeHtml(r.ip)}</span>
+                    </div>
+                </div>
+            `).join('')}
         </div>
     `;
 

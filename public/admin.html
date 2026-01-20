@@ -86,11 +86,9 @@
                 <div class="page-header">
                     <h1 class="page-title">分组及用户设置</h1>
                 </div>
-                <div class="card"
-                    style="display:flex; flex-direction:row; padding:0; overflow:hidden; min-height:600px; align-items:stretch;">
+                <div class="card users-split-card">
                     <!-- 左侧边栏：分组管理 -->
-                    <div
-                        style="width:300px; min-width:300px; border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--bg-card);">
+                    <div class="users-groups-pane">
                         <div
                             style="padding:20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
                             <span class="card-title" style="font-size:16px;">分组管理</span>
@@ -100,13 +98,14 @@
                     </div>
 
                     <!-- 右侧内容区：用户管理 -->
-                    <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
-                        <div
+                    <div class="users-users-pane">
+                        <div class="users-users-header"
                             style="padding:20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                            <div style="display:flex;align-items:center;gap:16px;">
+                            <div class="users-users-header-left" style="display:flex;align-items:center;gap:16px;">
                                 <span class="card-title" style="font-size:16px;">用户管理</span>
-                                <input type="text" class="form-input" id="user-search-input" placeholder="搜索用户"
-                                    onkeyup="filterUsers()" style="width:240px;padding:8px 12px;font-size:14px;">
+                                <input type="text" class="form-input users-user-search" id="user-search-input"
+                                    placeholder="搜索用户" onkeyup="filterUsers()"
+                                    style="padding:8px 12px;font-size:14px;">
                             </div>
                             <button class="btn btn-primary btn-sm" onclick="showAddUser()">添加用户</button>
                         </div>
@@ -120,7 +119,7 @@
                 <div class="page-header">
                     <h1 class="page-title">题库设置</h1>
                 </div>
-                <div class="flex gap-3 mb-4">
+                <div class="flex gap-3 mb-4 questions-toolbar">
                     <button class="btn btn-secondary" onclick="showCategorySettings()"
                         style="background:linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);color:white;border:none;">设置专业</button>
                     <button class="btn btn-primary" onclick="showAddQuestion('single')">增加单选题</button>

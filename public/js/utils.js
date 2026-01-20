@@ -70,3 +70,106 @@ function closeAlertModal() {
 
 window.showAlert = showAlert;
 window.closeAlertModal = closeAlertModal;
+
+function initMobileDrawerNavigation() {
+    const sidebar = document.querySelector('.sidebar');
+    const appLayout = document.querySelector('.app-layout');
+    if (!sidebar || !appLayout) return;
+
+    if (!document.querySelector('.drawer-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'drawer-overlay';
+        overlay.addEventListener('click', () => {
+            document.body.classList.remove('drawer-open');
+        });
+        document.body.appendChild(overlay);
+    }
+
+    if (!document.querySelector('.mobile-header')) {
+        const header = document.createElement('header');
+        header.className = 'mobile-header';
+        header.innerHTML = `
+            <button type="button" class="mobile-header-menu-btn" aria-label="打开菜单">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <div class="mobile-header-title" id="mobile-header-title"></div>
+            <div class="mobile-header-actions" id="mobile-header-actions"></div>
+        `;
+        document.body.prepend(header);
+
+        const btn = header.querySelector('.mobile-header-menu-btn');
+        btn?.addEventListener('click', () => {
+            document.body.classList.toggle('drawer-open');
+        });
+
+        const actions = header.querySelector('#mobile-header-actions');
+        if (actions && !document.getElementById('mobile-refresh-btn')) {
+            const refreshBtn = document.createElement('button');
+            refreshBtn.type = 'button';
+            refreshBtn.id = 'mobile-refresh-btn';
+            refreshBtn.className = 'mobile-header-icon-btn';
+            refreshBtn.setAttribute('aria-label', '刷新');
+            refreshBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 1 1-3-6.7"></path>
+                    <polyline points="21 3 21 9 15 9"></polyline>
+                </svg>
+            `;
+            refreshBtn.addEventListener('click', () => window.location.reload());
+            actions.appendChild(refreshBtn);
+        }
+    }
+
+    const updateTitle = () => {
+        const titleEl = document.getElementById('mobile-header-title');
+        if (!titleEl) return;
+        const pageTitle = document.querySelector('.page-content:not(.hidden) .page-title');
+        const text = (pageTitle?.textContent || document.title || '').trim();
+        titleEl.textContent = text;
+    };
+
+    updateTitle();
+
+    const moveThemeSwitcherIntoHeader = () => {
+        const headerActions = document.getElementById('mobile-header-actions');
+        const switcher = document.getElementById('theme-switcher') || document.querySelector('.theme-switcher');
+        if (!headerActions || !switcher) return;
+        if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+            if (switcher.parentElement !== headerActions) headerActions.appendChild(switcher);
+        } else {
+            if (switcher.parentElement !== document.body) document.body.appendChild(switcher);
+        }
+    };
+
+    moveThemeSwitcherIntoHeader();
+
+    sidebar.addEventListener('click', (e) => {
+        const navItem = e.target.closest?.('.nav-item');
+        if (!navItem) return;
+        document.body.classList.remove('drawer-open');
+        setTimeout(updateTitle, 0);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') document.body.classList.remove('drawer-open');
+    });
+
+    if (window.matchMedia) {
+        const mql = window.matchMedia('(max-width: 768px)');
+        const handleChange = () => {
+            if (!mql.matches) document.body.classList.remove('drawer-open');
+            moveThemeSwitcherIntoHeader();
+            updateTitle();
+        };
+        if (mql.addEventListener) mql.addEventListener('change', handleChange);
+        else mql.addListener(handleChange);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initMobileDrawerNavigation();
+});
