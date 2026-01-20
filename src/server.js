@@ -41,6 +41,11 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // 启动服务器
 async function startServer() {
+    // 检查 .env 状态
+    if (!fs.existsSync(path.join(__dirname, '../.env'))) {
+        console.warn('\x1b[33m%s\x1b[0m', '警告: 未检测到 .env 配置文件，系统将以默认(SQLite)模式运行');
+    }
+
     // 初始化数据库
     await db.initDatabase();
     console.log('数据库初始化完成');

@@ -317,6 +317,17 @@ start_app() {
         install_env
     fi
 
+    # 检查配置文件
+    if [ ! -f ".env" ]; then
+        if [ -f ".env.example" ]; then
+            echo -e "${YELLOW}提示: 未检测到 .env 配置文件，将根据模板自动创建...${NC}"
+            cp .env.example .env
+        else
+            echo -e "${RED}错误: 未找到 .env 或 .env.example 配置文件，请检查项目完整性。${NC}"
+            return 1
+        fi
+    fi
+
     if [ -f "$PID_FILE" ]; then
         current_pid=$(cat "$PID_FILE")
         if ps -p "$current_pid" > /dev/null 2>&1; then
@@ -798,6 +809,7 @@ show_menu() {
     echo -e " 8. ${YELLOW}初始化数据库 (Init DB)${NC}"
     echo -e " 9. ${GREEN}系统更新 (Update)${NC}"
     echo -e " 10. ${BLUE}系统还原 (Restore)${NC}"
+    echo -e " 11. ${GREEN}一键配置 Redis (Auto Redis)${NC}"
     echo " 0. 退出 (Exit)"
     echo -e "${BLUE}================================${NC}"
 }
@@ -818,6 +830,7 @@ if [ -z "$ACTION" ]; then
             8) init_sqlite_db ;;
             9) update_app ;;
             10) restore_app ;;
+            11) install_redis ;;
             0) echo "再见!"; exit 0 ;;
             *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
         esac
