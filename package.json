@@ -1,6 +1,6 @@
 {
   "name": "exam-system",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "企业考试系统",
   "main": "src/server.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "multer": "^2.0.2",
     "mysql2": "^3.16.1",
     "pg": "^8.17.1",
+    "redis": "^5.10.0",
     "sql.js": "^1.8.0",
     "uuid": "^9.0.1"
   },

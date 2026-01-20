@@ -6,6 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const db = require('./db/db-adapter');
 const dbConfig = require('./config/db-config');
+const fs = require('fs');
+const { createSessionStore } = require('./utils/session-store');
 
 // 统一 ID 生成函数
 const generateId = (prefix = '') => {
@@ -21,7 +23,17 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
 
 // 文件上传配置
-const upload = multer({ storage: multer.memoryStorage() });
+// 文件上传配置 (使用磁盘缓存，避免内存溢出)
+const TEMP_UPLOADS = path.join(__dirname, '../temp_uploads');
+// 启动时确保存储目录存在
+try {
+    if (!fs.existsSync(TEMP_UPLOADS)) {
+        fs.mkdirSync(TEMP_UPLOADS, { recursive: true });
+    }
+} catch (e) {
+    console.error('无法创建临时上传目录:', e);
+}
+const upload = multer({ dest: TEMP_UPLOADS });
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -34,35 +46,19 @@ async function startServer() {
     console.log('数据库初始化完成');
 
     // ==================== 认证中间件 ====================
-    // sessions 存储结构: token -> { user, expiresAt }
-    const sessions = new Map();
+    // 初始化 Session Store (支持 Redis/Memory)
+    const sessionStore = await createSessionStore();
+
+    // ==================== 认证中间件 ====================
 
     // 生成安全 Token
     const generateSecureToken = () => {
         return crypto.randomBytes(32).toString('hex');
     };
 
-    // 检查 Session 是否有效
-    const isSessionValid = (session) => {
-        return session && session.expiresAt > Date.now();
-    };
+    // Session 清理已由 Store 内部自动管理 (Redis TTL 或 Memory Interval)
 
-    // 定时清理过期 Session
-    setInterval(() => {
-        const now = Date.now();
-        let cleanedCount = 0;
-        for (const [token, session] of sessions.entries()) {
-            if (session.expiresAt <= now) {
-                sessions.delete(token);
-                cleanedCount++;
-            }
-        }
-        if (cleanedCount > 0) {
-            console.log(`已清理 ${cleanedCount} 个过期会话`);
-        }
-    }, SESSION_CLEANUP_INTERVAL);
-
-    const authMiddleware = (req, res, next) => {
+    const authMiddleware = async (req, res, next) => {
         // 白名单
         if (req.path === '/login') return next();
 
@@ -70,17 +66,24 @@ async function startServer() {
         if (!authHeader) return res.status(401).json({ error: '未登录或登录已过期' });
 
         const token = authHeader.split(' ')[1];
-        const session = sessions.get(token);
 
-        if (!token || !isSessionValid(session)) {
-            // 清理无效 Token
-            if (token) sessions.delete(token);
-            return res.status(401).json({ error: '无效的令牌或会话已过期' });
+        try {
+            const session = await sessionStore.get(token);
+
+            if (!token || !session) {
+                // 如果 Token 还在但 Session 没了 (比如 Redis 丢失或过期)，尝试清理客户端可能的无效 Token
+                // 但这里 server 端能做的就是返回 401
+                if (token) await sessionStore.delete(token); // 确保清理
+                return res.status(401).json({ error: '无效的令牌或会话已过期' });
+            }
+
+            req.user = session.user;
+            req.token = token; // 保存 token 以便续期
+            next();
+        } catch (err) {
+            console.error('Auth Error:', err);
+            return res.status(500).json({ error: 'Internal Server Error' });
         }
-
-        req.user = session.user;
-        req.token = token; // 保存 token 以便续期
-        next();
     };
 
     // 权限检查中间件
@@ -158,7 +161,7 @@ async function startServer() {
         try {
             await db.switchDatabase(dbType);
             // 清除所有会话，强制重新登录
-            sessions.clear();
+            await sessionStore.clear();
             // 记录日志
             await logAction('switch', 'database', dbType, req.user, { dbType }, getClientIp(req));
             res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
@@ -188,9 +191,16 @@ async function startServer() {
             return res.status(400).json({ error: '请上传文件' });
         }
         try {
-            await db.importSqliteDb(req.file.buffer);
+            // 读取文件 buffer
+            const fileData = fs.readFileSync(req.file.path);
+
+            await db.importSqliteDb(fileData);
+
+            // 清理临时文件
+            try { fs.unlinkSync(req.file.path); } catch (e) { }
+
             // 清除所有会话，强制重新登录
-            sessions.clear();
+            await sessionStore.clear();
             res.json({ success: true, message: '数据库导入成功，请重新登录' });
         } catch (e) {
             res.status(500).json({ error: e.message });
@@ -284,8 +294,10 @@ async function startServer() {
         if (user) {
             // 生成安全 Token
             const token = generateSecureToken();
+            // Redis Store 不需要在 value 中存 expiresAt，因为它由 TTL 控制
+            // 但为了兼容 currentUser 接口可能的逻辑，我们保留它
             const expiresAt = Date.now() + SESSION_EXPIRY_MS;
-            sessions.set(token, { user, expiresAt });
+            await sessionStore.set(token, { ...user, expiresAt }, SESSION_EXPIRY_MS);
             // 记录登录成功日志
             await logAction('login', 'user', user.id, user, { username }, clientIp);
             res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });

@@ -246,7 +246,7 @@ const mysqlAdapter = {
             password: config.password,
             database: config.database,
             waitForConnections: true,
-            connectionLimit: 10
+            connectionLimit: config.connectionLimit || 10
         });
 
         await this.createTables();
@@ -387,7 +387,7 @@ const postgresAdapter = {
             user: config.user,
             password: config.password,
             database: config.database,
-            max: 10
+            max: config.max || 10
         });
 
         await this.createTables();

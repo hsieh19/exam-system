@@ -31,7 +31,8 @@ function getMysqlConfig() {
         port: parseInt(process.env.MYSQL_PORT) || 3306,
         user: process.env.MYSQL_USER || 'root',
         password: process.env.MYSQL_PASSWORD || '',
-        database: process.env.MYSQL_DATABASE || 'exam_system'
+        database: process.env.MYSQL_DATABASE || 'exam_system',
+        connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10
     };
 }
 
@@ -42,7 +43,8 @@ function getPostgresConfig() {
         port: parseInt(process.env.POSTGRES_PORT) || 5432,
         user: process.env.POSTGRES_USER || 'postgres',
         password: process.env.POSTGRES_PASSWORD || '',
-        database: process.env.POSTGRES_DATABASE || 'exam_system'
+        database: process.env.POSTGRES_DATABASE || 'exam_system',
+        max: parseInt(process.env.DB_CONNECTION_LIMIT) || 10
     };
 }
 

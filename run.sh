@@ -100,6 +100,133 @@ command_exists() {
 # 环境管理功能
 # -------------------------------------------------------
 
+install_redis() {
+    echo -e "${BLUE}>>> 检查 Redis 环境...${NC}"
+
+    # 0. 检查 OS
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_NAME=$ID
+    else
+        echo -e "${RED}无法检测操作系统版本${NC}"
+        return 1
+    fi
+
+    # Windows 环境检测
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OS_NAME" == "" ]]; then
+        echo -e "${YELLOW}提示: 检测到当前可能为 Windows 环境或非标准 Linux 环境。${NC}"
+        echo -e "Windows 用户请手动安装 Redis 或使用 Docker Desktop。"
+        echo -e "推荐安装 Redis for Windows: https://github.com/tporadowski/redis/releases"
+        return 0
+    fi
+    
+    # 风险提示
+    echo -e "${YELLOW}⚠️  警告: 切换到 Redis 存储模式后，需要重启服务。${NC}"
+    echo -e "${YELLOW}      重启服务将导致【当前所有在线用户】强制登出。${NC}"
+    read -p "是否继续? (y/n): " confirm_install
+    if [[ "$confirm_install" != "y" ]]; then
+        echo "操作已取消"
+        return 0
+    fi
+
+    # 1. 检查 Redis 是否已安装
+    if command_exists redis-server; then
+        echo -e "${GREEN}Redis 已安装: $(redis-server --version | head -n 1)${NC}"
+    else
+        echo -e "${YELLOW}未检测到 Redis，准备自动安装...${NC}"
+        if [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "debian" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y redis-server
+        elif [[ "$OS_NAME" == "centos" ]] || [[ "$OS_NAME" == "rhel" ]]; then
+            # CentOS 需要 EPEL 源
+            if ! rpm -qa | grep -q epel-release; then
+                sudo yum install -y epel-release
+            fi
+            sudo yum install -y redis
+        else
+            echo -e "${RED}不支持的自动安装系统: $OS_NAME，请手动安装 Redis${NC}"
+            return 1
+        fi
+    fi
+
+    # 2. 启动服务 & 健康检查
+    echo -e "${BLUE}>>> 正在启动 Redis 服务...${NC}"
+    if command_exists systemctl; then
+        sudo systemctl enable redis
+        sudo systemctl start redis
+    else
+        redis-server --daemonize yes
+    fi
+    
+    # 等待几秒让服务启动
+    sleep 2
+    
+    # 关键：检查 Redis 是否真的活着
+    echo "正在检查 Redis 连接..."
+    if ! command_exists redis-cli; then
+        # 尝试安装 redis-tools (如果 redis-server 安装了但没有 cli)
+        if [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "debian" ]]; then
+            sudo apt-get install -y redis-tools
+        fi
+    fi
+
+    if command_exists redis-cli; then
+        if redis-cli ping | grep -q "PONG"; then
+             echo -e "${GREEN}Redis 连接测试通过 (PONG)${NC}"
+        else
+             echo -e "${RED}错误: Redis 服务启动失败或无法连接。${NC}"
+             echo -e "${RED}为了保护系统稳定性，将中止配置修改。请检查 Redis 日志。${NC}"
+             return 1
+        fi
+    else
+        echo -e "${YELLOW}警告: 未找到 redis-cli，跳过连接测试 (假设安装成功)${NC}"
+    fi
+
+    # 3. 修改项目配置 (.env)
+    echo -e "${BLUE}>>> 正在配置项目环境变量...${NC}"
+    ENV_FILE=".env"
+    if [ ! -f "$ENV_FILE" ]; then
+        if [ -f ".env.example" ]; then
+            cp .env.example .env
+        else
+            echo -e "${RED}错误: 未找到 .env 或 .env.example 文件${NC}"
+            return 1
+        fi
+    fi
+
+    # 备份
+    cp "$ENV_FILE" "${ENV_FILE}.bak_$(date +%Y%m%d%H%M%S)"
+    
+    # 智能更新配置
+    # 1. 处理 USE_REDIS
+    if grep -q "USE_REDIS=" "$ENV_FILE"; then
+        # 存在则替换
+        if echo "$OSTYPE" | grep -q "darwin"; then
+            sed -i '' 's/USE_REDIS=.*/USE_REDIS=true/g' "$ENV_FILE"
+        else
+            sed -i 's/USE_REDIS=.*/USE_REDIS=true/g' "$ENV_FILE"
+        fi
+    else
+        # 不存在则追加
+        echo "USE_REDIS=true" >> "$ENV_FILE"
+    fi
+
+    # 2. 处理 REDIS_URL
+    if ! grep -q "REDIS_URL=" "$ENV_FILE"; then
+         echo "REDIS_URL=redis://localhost:6379" >> "$ENV_FILE"
+    fi
+
+    echo -e "${GREEN}配置已更新: 已启用 Redis 模式${NC}"
+    
+    # 4. 询问是否立即重启
+    echo ""
+    read -p "是否立即重启服务以应用更改? (y/n): " confirm_restart
+    if [[ "$confirm_restart" == "y" ]]; then
+        restart_app
+    else
+        echo -e "${YELLOW}>>> 请稍后手动选择菜单 3 重启服务。${NC}"
+    fi
+}
 install_env() {
     echo -e "${BLUE}>>> 开始检查与部署运行环境...${NC}"
 

@@ -5,7 +5,7 @@ let cachedData = { groups: [], users: [], questions: [], papers: [], categories:
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.0.0', // 当前版本
+    version: '1.0.9', // 当前版本
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 
@@ -49,25 +49,38 @@ async function refreshCache() {
     cachedData.categories = await Storage.getCategories();
 }
 
+// 防止重复请求
+let isNavigating = false;
+
 function initNavigation() {
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', async function () {
-            const page = this.dataset.page;
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            this.classList.add('active');
-            document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
-            document.getElementById(`page-${page}`).classList.remove('hidden');
+            if (this.classList.contains('active') || isNavigating) return;
 
-            await refreshCache();
-            if (page === 'users') { loadGroups(); loadUsers(); }
-            else if (page === 'questions') loadQuestions();
-            else if (page === 'papers') { loadPaperGroups(); loadPapers(); }
-            else if (page === 'ranking') loadAdminRankingOptions();
-            else if (page === 'analysis') loadAdminAnalysisOptions();
-            else if (page === 'database') loadDbConfig();
-            else if (page === 'logs') {
-                initLogDateFilters();
-                loadSystemLogs();
+            isNavigating = true;
+            try {
+                const page = this.dataset.page;
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                this.classList.add('active');
+                document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
+                document.getElementById(`page-${page}`).classList.remove('hidden');
+
+                // 简单的防抖/节流：如果是快速切换，可能不需要每次都 refreshCache
+                // 但为了数据实时性，这里每次请求。结合后端的 304 缓存，其实开销很小。
+                // 重点是避免同一瞬间发两次。
+                await refreshCache();
+                if (page === 'users') { loadGroups(); loadUsers(); }
+                else if (page === 'questions') loadQuestions();
+                else if (page === 'papers') { loadPaperGroups(); loadPapers(); }
+                else if (page === 'ranking') loadAdminRankingOptions();
+                else if (page === 'analysis') loadAdminAnalysisOptions();
+                else if (page === 'database') loadDbConfig();
+                else if (page === 'logs') {
+                    initLogDateFilters();
+                    loadSystemLogs();
+                }
+            } finally {
+                isNavigating = false;
             }
         });
     });
