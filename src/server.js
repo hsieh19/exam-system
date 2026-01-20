@@ -650,6 +650,81 @@ async function startServer() {
         });
     });
 
+    // ==================== 考试数据接口（考生端） ====================
+    app.get('/api/exam/:paperId', async (req, res) => {
+        try {
+            const paperId = req.params.paperId;
+            const userId = req.user.id;
+            const user = await db.getUserById(userId);
+
+            if (!user) {
+                return res.status(401).json({ error: '用户不存在' });
+            }
+
+            const paper = await db.getPaperById(paperId);
+            if (!paper || !paper.published) {
+                return res.status(404).json({ error: '试卷不存在或未发布' });
+            }
+
+            // 检查是否在推送范围内
+            const inGroup = paper.targetGroups && paper.targetGroups.length > 0
+                ? paper.targetGroups.includes(user.groupId)
+                : false;
+            const inUsers = paper.targetUsers && paper.targetUsers.length > 0
+                ? paper.targetUsers.includes(user.id)
+                : false;
+
+            if (!inGroup && !inUsers) {
+                return res.status(403).json({ error: '无权参加该考试' });
+            }
+
+            // 截止时间检查
+            if (paper.deadline) {
+                const now = new Date();
+                const deadline = new Date(paper.deadline.replace(' ', 'T'));
+                if (deadline < now) {
+                    return res.status(400).json({ error: '考试已截止' });
+                }
+            }
+
+            // 是否已参加
+            if (await db.hasUserTakenExam(user.id, paper.id)) {
+                return res.status(400).json({ error: '您已参加过该考试' });
+            }
+
+            // 组装试题列表（只返回当前试卷包含的题目）
+            const allQuestions = await db.getQuestions();
+            const qMap = new Map();
+            allQuestions.forEach(q => qMap.set(q.id, q));
+
+            const selectedQuestions = [];
+            if (paper.questions) {
+                const types = ['single', 'multiple', 'judge'];
+                types.forEach(type => {
+                    const ids = paper.questions[type] || [];
+                    ids.forEach(id => {
+                        const q = qMap.get(id);
+                        if (q) selectedQuestions.push(q);
+                    });
+                });
+            }
+
+            res.json({
+                paper: {
+                    id: paper.id,
+                    name: paper.name,
+                    rules: paper.rules || [],
+                    questions: paper.questions || {},
+                    deadline: paper.deadline || null
+                },
+                questions: selectedQuestions
+            });
+        } catch (e) {
+            console.error('获取考试数据失败:', e);
+            res.status(500).json({ error: '获取考试数据失败' });
+        }
+    });
+
     // ==================== 系统日志接口 ====================
     app.get('/api/logs', superAdminMiddleware, async (req, res) => {
         const filter = {};

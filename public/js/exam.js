@@ -12,17 +12,29 @@ document.addEventListener('DOMContentLoaded', async function () {
     const paperId = sessionStorage.getItem('current_paper_id');
     if (!paperId) { showAlert('未选择试卷', () => window.location.href = 'student.html'); return; }
 
-    paper = await Storage.getPaperById(paperId);
-    if (!paper) { showAlert('试卷不存在', () => window.location.href = 'student.html'); return; }
+    try {
+        const examData = await Storage.getExamPaper(paperId);
+        if (!examData || examData.error) {
+            const msg = examData && examData.error ? examData.error : '无法加载试卷';
+            showAlert(msg, () => window.location.href = 'student.html');
+            return;
+        }
 
-    await initExam();
+        paper = examData.paper;
+        allQuestions = examData.questions || [];
+
+        if (!paper || !allQuestions.length) {
+            showAlert('试卷数据不完整或题目为空', () => window.location.href = 'student.html');
+            return;
+        }
+
+        await initExam();
+    } catch (e) {
+        showAlert('加载试卷失败: ' + e.message, () => window.location.href = 'student.html');
+    }
 });
 
 async function initExam() {
-    const questions = await Storage.getQuestions();
-    const qMap = {};
-    questions.forEach(q => qMap[q.id] = q);
-
     // 构建规则映射
     if (paper.rules && paper.rules.length) {
         paper.rules.forEach(rule => {
@@ -38,20 +50,6 @@ async function initExam() {
             multiple: { score: 4, partialScore: 2, timeLimit: 30 },
             judge: { score: 2, partialScore: 0, timeLimit: 20 }
         };
-    }
-
-    // 按顺序排列题目
-    allQuestions = [];
-    if (paper.questions) {
-        const types = ['single', 'multiple', 'judge'];
-        types.forEach(type => {
-            const ids = paper.questions[type] || [];
-            ids.forEach(id => {
-                if (qMap[id]) {
-                    allQuestions.push(qMap[id]);
-                }
-            });
-        });
     }
 
     document.getElementById('total-num').textContent = allQuestions.length;

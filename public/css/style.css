@@ -367,6 +367,8 @@ a:hover {
   border: none;
   cursor: pointer;
   transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .btn-primary {
@@ -1224,6 +1226,10 @@ a:hover {
    =========================== */
 @media (max-width: 768px) {
 
+  .login-container {
+    padding: 16px;
+  }
+
   /* 侧边栏变为顶部导航 */
   .sidebar {
     position: fixed;
@@ -1345,6 +1351,10 @@ a:hover {
   .login-card {
     padding: 32px 24px;
     margin: 16px;
+    width: 100%;
+  }
+  .login-logo h1 {
+    font-size: 28px;
   }
 
   /* 表单适应 */
@@ -1361,6 +1371,13 @@ a:hover {
 @media (max-width: 480px) {
   .main-content {
     padding: 12px;
+  }
+  .login-card {
+    margin: 0;
+    border-radius: var(--radius-lg);
+  }
+  .login-logo h1 {
+    font-size: 24px;
   }
 
   .nav-item {

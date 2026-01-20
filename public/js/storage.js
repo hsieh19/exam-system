@@ -1,22 +1,40 @@
-// Storage API - 使用后端 SQLite 数据库
 const API_BASE = '';
-
-// 当前用户缓存
 let currentUser = null;
+const SafeStorage = {
+  get(key) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v !== null && v !== undefined) return v;
+    } catch (e) {}
+    try {
+      return sessionStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return;
+    } catch (e) {}
+    try {
+      sessionStorage.setItem(key, value);
+    } catch (e) {}
+  },
+  remove(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+    try { sessionStorage.removeItem(key); } catch (e) {}
+  }
+};
 
-
-// 统一的带鉴权请求
 async function authFetch(url, options = {}) {
   options.headers = options.headers || {};
   options.headers['Content-Type'] = 'application/json';
-
-  const token = sessionStorage.getItem('auth_token');
+  const token = SafeStorage.get('auth_token');
   if (token) {
     options.headers['Authorization'] = 'Bearer ' + token;
   }
-
   try {
-    // Use window.fetch to avoid getting replaced
     const res = await window.fetch(url, options);
     if (res.status === 401) {
       Storage.logout();
@@ -31,7 +49,6 @@ async function authFetch(url, options = {}) {
     throw e;
   }
 }
-
 
 const Storage = {
   // ==================== 用户相关 ====================
@@ -70,8 +87,8 @@ const Storage = {
     }).then(data => {
       if (data && data.token && data.user) {
         currentUser = data.user;
-        sessionStorage.setItem('current_user', JSON.stringify(data.user));
-        sessionStorage.setItem('auth_token', data.token);
+        SafeStorage.set('current_user', JSON.stringify(data.user));
+        SafeStorage.set('auth_token', data.token);
         return data.user;
       }
       return null;
@@ -83,7 +100,7 @@ const Storage = {
 
   getCurrentUser() {
     if (currentUser) return currentUser;
-    const saved = sessionStorage.getItem('current_user');
+    const saved = SafeStorage.get('current_user');
     if (saved) {
       currentUser = JSON.parse(saved);
       return currentUser;
@@ -94,16 +111,16 @@ const Storage = {
   setCurrentUser(user) {
     currentUser = user;
     if (user) {
-      sessionStorage.setItem('current_user', JSON.stringify(user));
+      SafeStorage.set('current_user', JSON.stringify(user));
     } else {
-      sessionStorage.removeItem('current_user');
+      SafeStorage.remove('current_user');
     }
   },
 
   logout() {
     currentUser = null;
-    sessionStorage.removeItem('current_user');
-    sessionStorage.removeItem('auth_token');
+    SafeStorage.remove('current_user');
+    SafeStorage.remove('auth_token');
   },
 
   // ==================== 分组相关 ====================
@@ -226,6 +243,10 @@ const Storage = {
     return authFetch(`${API_BASE}/api/papers/user/${userId}`).then(r => r.json());
   },
 
+  getExamPaper(paperId) {
+    return authFetch(`${API_BASE}/api/exam/${paperId}`).then(r => r.json());
+  },
+
   // ==================== 记录相关 ====================
   getRecords() {
     return authFetch(`${API_BASE}/api/records`).then(r => r.json());
@@ -275,7 +296,7 @@ const Storage = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = sessionStorage.getItem('auth_token');
+    const token = SafeStorage.get('auth_token');
     return window.fetch(`${API_BASE}/api/db/import`, {
       method: 'POST',
       headers: {
