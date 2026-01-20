@@ -5,7 +5,7 @@ let cachedData = { groups: [], users: [], questions: [], papers: [], categories:
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.0.11', // 当前版本
+    version: '1.0.15', // 当前版本
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 
@@ -2669,8 +2669,22 @@ async function checkVersion() {
     if (!versionEl) return;
 
     try {
+        // 1. 先从后端获取当前实际运行的版本号
+        try {
+            const vRes = await fetch('/api/version');
+            if (vRes.ok) {
+                const vData = await vRes.json();
+                if (vData.version) {
+                    AppConfig.version = vData.version;
+                }
+            }
+        } catch (verErr) {
+            console.warn('获取后端版本失败，使用默认值:', verErr);
+        }
+
         renderVersionInfo(AppConfig.version, false);
 
+        // 2. 检查 GitHub 最新版本
         const response = await fetch(`https://api.github.com/repos/${AppConfig.githubRepo}/releases/latest`);
 
         if (response.ok) {

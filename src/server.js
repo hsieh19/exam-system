@@ -37,6 +37,17 @@ const upload = multer({ dest: TEMP_UPLOADS });
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+
+// 获取系统版本号
+app.get('/api/version', (req, res) => {
+    try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+        res.json({ version: pkg.version });
+    } catch (e) {
+        res.status(500).json({ error: '无法读取版本号' });
+    }
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 // 启动服务器
