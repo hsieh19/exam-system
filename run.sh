@@ -152,8 +152,9 @@ install_redis() {
     # 2. 启动服务 & 健康检查
     echo -e "${BLUE}>>> 正在启动 Redis 服务...${NC}"
     if command_exists systemctl; then
-        sudo systemctl enable redis
-        sudo systemctl start redis
+        # 使用 redis-server 以避免别名问题，并吞掉 enable 可能产生的非致命警告
+        sudo systemctl enable redis-server >/dev/null 2>&1 || sudo systemctl enable redis >/dev/null 2>&1
+        sudo systemctl start redis-server || sudo systemctl start redis
     else
         redis-server --daemonize yes
     fi

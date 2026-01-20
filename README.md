@@ -102,7 +102,7 @@ DB_CONNECTION_LIMIT=50  # 增大连接池
 ### 2. 启用 Redis 会话与集群模式
 当使用 `PM2` 启动多个实例（Cluster Mode）时，必须使用 Redis 共享 Session：
 - **手动配置**：设置 `USE_REDIS=true` 并指定 `REDIS_URL`。
-- **自动配置 (Linux)**：运行 `./run.sh` 并选择 **`6. 安装/切换 Redis`**，脚本将自动完成环境安装与 `.env` 修改。
+- **自动配置 (Linux)**：运行 `./run.sh` 并选择 **`11. 一键配置 Redis`**，脚本将自动完成环境安装与 `.env` 修改。
 
 ### 3. 环境变量参考
 | 变量名 | 说明 | 推荐值 |
