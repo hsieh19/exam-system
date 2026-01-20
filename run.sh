@@ -343,6 +343,13 @@ status_app() {
     else
         echo -e "${RED}● 服务未运行${NC}"
     fi
+
+    # 检查开机自启状态
+    if is_autostart_enabled; then
+        echo -e "   开机自启: ${GREEN}已开启${NC}"
+    else
+        echo -e "   开机自启: ${RED}已关闭${NC}"
+    fi
 }
 
 view_logs() {
@@ -572,8 +579,10 @@ update_app() {
         echo -e "${YELLOW}之前的代码备份在: ${BACKUP_DIR}${NC}"
         return 1
     fi
-    
-    echo -e "${YELLOW}>>> 启动服务...${NC}"
+    echo -e "${YELLOW}>>> 启动服务并检查自启配置...${NC}"
+    if ! is_autostart_enabled; then
+        echo -e "${BLUE}检测到未开启开机自启，系统更新后将自动为您补全配置...${NC}"
+    fi
     start_app
     
     echo ""

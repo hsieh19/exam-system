@@ -1,6 +1,6 @@
 {
   "name": "exam-system",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "企业考试系统",
   "main": "src/server.js",
   "scripts": {
