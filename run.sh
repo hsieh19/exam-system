@@ -20,8 +20,70 @@ BLUE='\033[0;36m'
 NC='\033[0m' # No Color
 
 # -------------------------------------------------------
+# 命令行参数解析 (支持非交互式调用)
+# -------------------------------------------------------
+if [ $# -gt 0 ]; then
+    # 提前定义部分基础函数以供调用 (或直接跳转到逻辑段)
+    case "$1" in
+        start)
+            # 这里需要跳转到 start_app，但函数定义在后面
+            # 所以我们将参数处理放在文件末尾或封装逻辑
+            ACTION="start"
+            [[ "$2" == "--no-persist" ]] && PERSIST_FLAG="--no-persist"
+            ;;
+        stop)
+            ACTION="stop"
+            [[ "$2" == "--no-persist" ]] && PERSIST_FLAG="--no-persist"
+            ;;
+        restart) ACTION="restart" ;;
+        status)  ACTION="status" ;;
+        logs)    ACTION="logs" ;;
+        *)       echo "用法: $0 {start|stop|restart|status|logs} [--no-persist]"; exit 1 ;;
+    esac
+fi
+
+# -------------------------------------------------------
 # 辅助函数
 # -------------------------------------------------------
+
+# 检查 crontab 是否可用
+check_cron_exists() {
+    if ! command_exists crontab; then
+        return 1
+    fi
+    return 0
+}
+
+# 管理开机自启
+# action: enable | disable
+manage_autostart() {
+    local action=$1
+    if ! check_cron_exists; then
+        return
+    fi
+
+    local script_path=$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null)
+    if [ -z "$script_path" ]; then
+        # 降级方案：如果无法获取绝对路径，使用当前目录
+        script_path="$(pwd)/run.sh"
+    fi
+    local work_dir=$(dirname "$script_path")
+    local cron_job="@reboot cd \"$work_dir\" && bash \"$script_path\" start --no-persist > /dev/null 2>&1"
+
+    if [ "$action" == "enable" ]; then
+        # 先清除旧的，再添加新的 (防止重复)
+        (crontab -l 2>/dev/null | grep -v "run.sh start"; echo "$cron_job") | crontab -
+    elif [ "$action" == "disable" ]; then
+        (crontab -l 2>/dev/null | grep -v "run.sh start") | crontab -
+    fi
+}
+
+# 检查当前是否已开启自启
+is_autostart_enabled() {
+    if ! check_cron_exists; then return 1; fi
+    crontab -l 2>/dev/null | grep -q "run.sh start"
+    return $?
+}
 
 check_user_perm() {
     # 部分操作需要 root 权限 (如安装环境)
@@ -118,6 +180,11 @@ install_env() {
 # -------------------------------------------------------
 
 start_app() {
+    local persist=true
+    if [[ "$1" == "--no-persist" ]]; then
+        persist=false
+    fi
+
     # 每次启动前先尝试安装依赖(如果不存在)
     if [ ! -d "node_modules" ]; then
         install_env
@@ -138,6 +205,12 @@ start_app() {
     new_pid=$!
     echo "$new_pid" > "$PID_FILE"
     
+    # 启用开机自启
+    if [ "$persist" = true ]; then
+        manage_autostart enable
+        echo -e "${BLUE}已开启开机自动启动${NC}"
+    fi
+
     # 循环检查服务状态 (最多等待 10 秒)
     echo "正在等待服务启动..."
     for i in {1..10}; do
@@ -153,80 +226,87 @@ start_app() {
         # 2. 检查日志是否有报错 (可选)
         if grep -q "Error:" "$LOG_FILE"; then
              echo -e "${RED}启动检测到错误日志${NC}"
-             # 不立即退出，可能只是打印错误但仍在运行，交由人工判断或继续观察
         fi
 
-        # 3. 检查端口是否被监听 (如果安装了 netstat/ss)
+        # 3. 检查端口是否被监听
         if command_exists netstat; then
              if netstat -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
                  echo -e "${GREEN}服务启动成功! (端口 $APP_PORT 已监听)${NC}"
-                 echo -e "PID: ${GREEN}$new_pid${NC}"
-                 echo -e "访问地址: http://localhost:$APP_PORT"
-                 return 0
-             fi
-        elif command_exists ss; then
-             if ss -tulpn 2>/dev/null | grep -q ":$APP_PORT "; then
-                 echo -e "${GREEN}服务启动成功! (端口 $APP_PORT 已监听)${NC}"
-                 echo -e "PID: ${GREEN}$new_pid${NC}"
                  echo -e "访问地址: http://localhost:$APP_PORT"
                  return 0
              fi
         fi
     done
     
-    # 如果10秒后进程还在但端口未检测到(或无工具检测)，认为勉强成功
-    echo -e "${GREEN}服务已启动 (PID: $new_pid)，请手动验证端口是否连通${NC}"
+    echo -e "${GREEN}服务已启动 (PID: $new_pid)${NC}"
     echo -e "日志文件: $LOG_FILE"
 }
 
 stop_app() {
+    local persist=true
+    if [[ "$1" == "--no-persist" ]]; then
+        persist=false
+    fi
+
     local pid=""
-    
-    # 1. 尝试从 PID 文件获取
     if [ -f "$PID_FILE" ]; then
         pid=$(cat "$PID_FILE")
     fi
     
-    # 2. 如果 PID 文件无效，尝试从端口获取 (Linux/Mac)
     if [ -z "$pid" ] || ! ps -p "$pid" > /dev/null 2>&1; then
         if command_exists lsof; then
             pid=$(lsof -t -i:$APP_PORT)
-        elif command_exists netstat; then
-            pid=$(netstat -nlp | grep ":$APP_PORT " | awk '{print $7}' | awk -F'/' '{print $1}')
         fi
     fi
     
     if [ -z "$pid" ]; then
-        echo -e "${YELLOW}未检测到运行中的服务 (端口 $APP_PORT 空闲)${NC}"
+        echo -e "${YELLOW}未检测到运行中的服务${NC}"
         [ -f "$PID_FILE" ] && rm "$PID_FILE"
+        # 即使进程不在，也根据要求取消自启
+        if [ "$persist" = true ]; then manage_autostart disable; fi
         return
     fi
     
     echo "正在停止服务 (PID: $pid)..."
     kill "$pid" 2>/dev/null
     
-    # 等待进程退出
     for i in {1..5}; do
-        if ! ps -p "$pid" > /dev/null 2>&1; then
-            break
-        fi
+        if ! ps -p "$pid" > /dev/null 2>&1; then break; fi
         sleep 1
     done
     
-    # 强制杀死
     if ps -p "$pid" > /dev/null 2>&1; then
-        echo "服务未响应，强制停止..."
         kill -9 "$pid" 2>/dev/null
     fi
 
     [ -f "$PID_FILE" ] && rm "$PID_FILE"
+    
+    # 取消开机自启
+    if [ "$persist" = true ]; then
+        manage_autostart disable
+        echo -e "${BLUE}已取消开机自动启动${NC}"
+    fi
+
     echo -e "${GREEN}服务已停止${NC}"
 }
 
 restart_app() {
-    stop_app
+    # 记录当前状态
+    local was_autostart=false
+    if is_autostart_enabled; then
+        was_autostart=true
+    fi
+
+    echo "正在重启服务..."
+    # 停止时不改变自启配置
+    stop_app --no-persist
     sleep 1
-    start_app
+    # 启动时恢复之前的自启配置
+    if [ "$was_autostart" = true ]; then
+        start_app
+    else
+        start_app --no-persist
+    fi
 }
 
 status_app() {
@@ -585,25 +665,36 @@ show_menu() {
     echo -e "${BLUE}================================${NC}"
 }
 
-# 主循环
-while true; do
-    show_menu
-    read -p "请输入选项数字: " choice
-    case "$choice" in
-        1) start_app ;;
-        2) stop_app ;;
-        3) restart_app ;;
-        4) status_app ;;
-        5) view_logs ;;
-        6) install_env ;;
-        7) uninstall_app ;;
-        8) init_sqlite_db ;;
-        9) update_app ;;
-        10) restore_app ;;
-        0) echo "再见!"; exit 0 ;;
-        *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
+# 执行逻辑
+if [ -z "$ACTION" ]; then
+    while true; do
+        show_menu
+        read -p "请输入选项数字: " choice
+        case "$choice" in
+            1) start_app ;;
+            2) stop_app ;;
+            3) restart_app ;;
+            4) status_app ;;
+            5) view_logs ;;
+            6) install_env ;;
+            7) uninstall_app ;;
+            8) init_sqlite_db ;;
+            9) update_app ;;
+            10) restore_app ;;
+            0) echo "再见!"; exit 0 ;;
+            *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
+        esac
+        
+        echo ""
+        read -p "按回车键继续..."
+    done
+elif [ -n "$ACTION" ]; then
+    case "$ACTION" in
+        start)   start_app $PERSIST_FLAG ;;
+        stop)    stop_app $PERSIST_FLAG ;;
+        restart) restart_app ;;
+        status)  status_app ;;
+        logs)    view_logs ;;
     esac
-    
-    echo ""
-    read -p "按回车键继续..."
-done
+    exit 0
+fi
