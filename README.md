@@ -84,6 +84,35 @@
     ```
 5.  **访问**：打开浏览器访问 `http://localhost:3000`
 
+## ⚡ 高并发优化配置
+
+在企业级大规模并发场景（如数百人同时在线考试）下，建议进行以下优化配置：
+
+### 1. 切换高性能数据库
+SQLite 在高并发写入（如同时提交试卷）时可能出现锁竞争。请在 `.env` 中切换为 MySQL 或 PostgreSQL：
+```env
+DB_TYPE=mysql
+MYSQL_HOST=127.0.0.1
+MYSQL_USER=your_user
+MYSQL_PASSWORD=your_password
+MYSQL_DATABASE=exam_system
+DB_CONNECTION_LIMIT=50  # 增大连接池
+```
+
+### 2. 启用 Redis 会话与集群模式
+当使用 `PM2` 启动多个实例（Cluster Mode）时，必须使用 Redis 共享 Session：
+- **手动配置**：设置 `USE_REDIS=true` 并指定 `REDIS_URL`。
+- **自动配置 (Linux)**：运行 `./run.sh` 并选择 **`6. 安装/切换 Redis`**，脚本将自动完成环境安装与 `.env` 修改。
+
+### 3. 环境变量参考
+| 变量名 | 说明 | 推荐值 |
+|------|----|----|
+| `NODE_ENV` | 运行模式 | `production` |
+| `USE_REDIS` | 是否启用 Redis 存储 Session | `true` |
+| `DB_CONNECTION_LIMIT` | 数据库连接池上限 | `50+` |
+
+---
+
 ## ⚙️ 默认账号
 
 > ⚠️ **生产环境安全提示**：请在首次登录后立即修改默认管理员密码。
@@ -106,24 +135,28 @@
 ## 📂 目录结构
 
 ```text
-├── .github/            # GitHub 配置（如 workflows）
-├── docs/               # 项目文档 (run.md)
-├── public/             # 静态资源 (HTML, CSS, JS)
+├── CHANGELOG.md        # 更新日志
+├── README.md           # 项目说明文档
+├── ecosystem.config.js # PM2 集群配置文件
+├── run.sh              # 综合管理脚本 (部署、启动、更新、Redis安装等)
+├── .env.example        # 环境变量模板
+├── .env                # 运行时环境变量 (数据库连接、Redis配置等)
+├── package.json        # 项目依赖与版本配置
+├── public/             # 前端静态资源
 │   ├── index.html      # 登录页
-│   ├── admin.html      # 管理端主页
-│   ├── student.html    # 考生端主页
-│   ├── exam.html       # 考试进行页
-│   ├── css/            # 样式表
-│   └── js/             # 前端逻辑 (storage.js, admin.js 等)
-├── src/                # 后端源码
-│   ├── server.js       # 后端服务入口
-│   ├── db/             # 数据库层 (db-adapter.js 支持多种数据库)
-│   └── config/         # 配置文件
-├── db/                 # 数据库文件存储 (exam.db)
-├── .env                # 环境配置文件 (数据库连接信息)
-├── .gitignore          # Git 忽略配置
-├── package.json        # 项目依赖与配置
-└── run.sh              # 综合管理脚本
+│   ├── admin.html      # 管理管理员主页
+│   ├── student.html    # 考生主页
+│   ├── exam.html       # 考试练习页
+│   ├── css/            # 样式文件
+│   └── js/             # 前端业务逻辑 (Auth, Storage, API 等)
+├── src/                # 后端控制逻辑
+│   ├── server.js       # Express 服务入口
+│   ├── db/             # 数据库适配层 (支持多种数据库适配器)
+│   ├── config/         # 后端配置 (数据库连接逻辑)
+│   └── utils/          # 工具类 (SessionStore 共享会话管理)
+├── db/                 # 默认 SQLite 数据库存储目录
+├── temp_uploads/       # 临时文件上传目录 (高并发优化)
+└── docs/               # 项目辅助文档
 ```
 
 ## 🔒 考试评分规则

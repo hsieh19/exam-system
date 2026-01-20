@@ -174,6 +174,14 @@ const sqliteAdapter = {
                 ['admin-001', 'admin', hashedPwd, 'super_admin']);
         }
 
+        // 确保有演示学生账号
+        const student = this.db.exec("SELECT * FROM users WHERE username = 'student'");
+        if (!student.length || !student[0].values.length) {
+            const hashedPwd = hashPassword('123456');
+            this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
+                ['student-001', 'student', hashedPwd, 'student']);
+        }
+
         this.save();
     },
 
@@ -340,6 +348,16 @@ const mysqlAdapter = {
                 ['admin-001', 'admin', hashedPwd, 'super_admin']
             );
         }
+
+        // 确保有演示学生账号
+        const [studentRows] = await this.pool.execute("SELECT * FROM users WHERE username = 'student'");
+        if (studentRows.length === 0) {
+            const hashedPwd = hashPassword('123456');
+            await this.pool.execute(
+                "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
+                ['student-001', 'student', hashedPwd, 'student']
+            );
+        }
     },
 
     async query(sql, params = []) {
@@ -479,6 +497,16 @@ const postgresAdapter = {
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
                 ['admin-001', 'admin', hashedPwd, 'super_admin']
+            );
+        }
+
+        // 确保有演示学生账号
+        const studentResult = await this.pool.query("SELECT * FROM users WHERE username = 'student'");
+        if (studentResult.rows.length === 0) {
+            const hashedPwd = hashPassword('123456');
+            await this.pool.query(
+                "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
+                ['student-001', 'student', hashedPwd, 'student']
             );
         }
     },
