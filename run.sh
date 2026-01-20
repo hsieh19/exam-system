@@ -303,6 +303,60 @@ install_env() {
     echo -e "${GREEN}>>> 环境部署完成${NC}"
 }
 
+# 自动同步 .env 缺少的配置项 (采用模板填充法)
+sync_env() {
+    local env_file=".env"
+    local example_file=".env.example"
+    local temp_file=".env.tmp"
+    local bak_file=".env.bak_$(date +%Y%m%d%H%M%S)"
+
+    if [ ! -f "$env_file" ] || [ ! -f "$example_file" ]; then
+        return
+    fi
+
+    echo -e "${BLUE}>>> 正在同步并优化环境变量配置结构...${NC}"
+    cp "$env_file" "$bak_file"
+    # 以模板为基础创建新配置
+    cp "$example_file" "$temp_file"
+
+    local updated_count=0
+    local custom_count=0
+    
+    # 逐行读取旧的 .env 文件进行值恢复
+    while IFS= read -r line || [ -n "$line" ]; do
+        # 忽略空行和纯注释行
+        [[ -z "${line// /}" ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+        # 提取变量名 (Key) 和 变量值 (Value)
+        local key=$(echo "$line" | cut -d'=' -f1 | tr -d ' ')
+        local value=$(echo "$line" | cut -d'=' -f2-)
+        
+        if [ -n "$key" ]; then
+            # 检查模板中是否存在该 Key
+            if grep -q "^${key}=" "$temp_file"; then
+                # 如果存在，则将旧值填入模板（使用 | 作为定界符防止路径冲突）
+                # 转义特殊符号 & | \ 以适配 sed
+                local escaped_val=$(echo "$value" | sed 's/[&\|]/\\&/g')
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    sed -i '' "s|^${key}=.*|${key}=${escaped_val}|" "$temp_file"
+                else
+                    sed -i "s|^${key}=.*|${key}=${escaped_val}|" "$temp_file"
+                fi
+                updated_count=$((updated_count + 1))
+            else
+                # 如果模板中没有，说明是用户私有配置，保留在末尾
+                echo "$line" >> "$temp_file"
+                custom_count=$((custom_count + 1))
+            fi
+        fi
+    done < "$env_file"
+
+    mv "$temp_file" "$env_file"
+    echo -e "${GREEN}同步完成: 已对齐最新模板，迁移 ${updated_count} 项配置，保留 ${custom_count} 项自定义配置${NC}"
+    echo -e "${YELLOW}提示: 原配置文件已备份至 ${bak_file}${NC}"
+}
+
 # -------------------------------------------------------
 # 服务管理功能
 # -------------------------------------------------------
@@ -327,6 +381,9 @@ start_app() {
             echo -e "${RED}错误: 未找到 .env 或 .env.example 配置文件，请检查项目完整性。${NC}"
             return 1
         fi
+    else
+        # 如果已存在，则同步可能新增的配置项
+        sync_env
     fi
 
     if [ -f "$PID_FILE" ]; then
