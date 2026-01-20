@@ -5,7 +5,7 @@ let cachedData = { groups: [], users: [], questions: [], papers: [], categories:
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.0.9', // 当前版本
+    version: '1.0.10', // 当前版本
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 

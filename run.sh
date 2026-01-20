@@ -692,6 +692,7 @@ update_app() {
     cp -rf "${EXTRACTED_DIR}src" ./
     cp -f "${EXTRACTED_DIR}package.json" ./
     cp -f "${EXTRACTED_DIR}run.sh" ./
+    [ -f "${EXTRACTED_DIR}.env.example" ] && cp -f "${EXTRACTED_DIR}.env.example" ./
     
     rm -rf "$TEMP_DIR"
     
