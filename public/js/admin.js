@@ -2,6 +2,10 @@ let editingQuestion = null;
 let editingUserId = null; // 新增：用于标记当前正在编辑的用户
 let selectedGroupId = null; // 当前选中的分组ID
 let cachedData = { groups: [], users: [], questions: [], papers: [], categories: [] };
+let groupAccordionOpen = true;
+let currentPage = 'users';
+let autoRefreshTimer = null;
+let isRefreshing = false;
 
 // ========== 版本控制 ==========
 const AppConfig = {
@@ -21,6 +25,10 @@ document.addEventListener('DOMContentLoaded', async function () {
         loadUsers();
         ensureQuestionsFab();
         updateQuestionFabVisibility();
+        startAutoRefresh();
+        window.addEventListener('focus', () => { if (document.visibilityState === 'visible') refreshActivePage(); });
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshActivePage(); });
+        initRealtime();
     }
 });
 
@@ -54,6 +62,39 @@ async function refreshCache() {
 // 防止重复请求
 let isNavigating = false;
 
+function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            refreshActivePage();
+        }
+    }, 5000);
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
+async function refreshActivePage() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    try {
+        await refreshCache();
+        if (currentPage === 'users') { loadGroups(); loadUsers(); }
+        else if (currentPage === 'questions') loadQuestions();
+        else if (currentPage === 'papers') { loadPaperGroups(); loadPapers(); }
+        else if (currentPage === 'logs') {
+            initLogDateFilters();
+            loadSystemLogs();
+        }
+    } finally {
+        isRefreshing = false;
+    }
+}
+
 function initNavigation() {
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', async function () {
@@ -67,6 +108,7 @@ function initNavigation() {
                 document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
                 document.getElementById(`page-${page}`).classList.remove('hidden');
                 updateQuestionFabVisibility();
+                currentPage = page;
 
                 // 简单的防抖/节流：如果是快速切换，可能不需要每次都 refreshCache
                 // 但为了数据实时性，这里每次请求。结合后端的 304 缓存，其实开销很小。
@@ -82,6 +124,7 @@ function initNavigation() {
                     initLogDateFilters();
                     loadSystemLogs();
                 }
+                startAutoRefresh();
             } finally {
                 isNavigating = false;
             }
@@ -102,6 +145,19 @@ function initNavigation() {
 }
 
 let questionsFabRoot = null;
+
+let es = null;
+function initRealtime() {
+    try {
+        const token = SafeStorage.get('auth_token');
+        if (!token) return;
+        if (es) { es.close(); es = null; }
+        es = new EventSource(`/events?token=${encodeURIComponent(token)}`);
+        es.addEventListener('db_change', () => {
+            refreshActivePage();
+        });
+    } catch (e) {}
+}
 
 function ensureQuestionsFab() {
     if (questionsFabRoot) return;
@@ -200,11 +256,11 @@ function loadGroups() {
         }
     }
 
-    // 渲染为列表形式以便选择
     const listHtml = `
-        <div class="group-list" style="display:flex; flex-direction:column; gap:0;">
-            ${groups.length ? '' : '<div style="padding:15px;text-align:center;color:var(--text-muted);">暂无分组</div>'}
-            ${groups.map(g => {
+        <div id="group-accordion-content" class="group-accordion-content">
+            <div class="group-list" style="display:flex; flex-direction:column; gap:0;">
+                ${groups.length ? '' : '<div style="padding:15px;text-align:center;color:var(--text-muted);">暂无分组</div>'}
+                ${groups.map(g => {
         const isActive = selectedGroupId === g.id;
         const activeStyle = isActive ? 'background-color: rgba(37, 99, 235, 0.1); border-left: 3px solid var(--primary);' : 'border-left: 3px solid transparent;';
 
@@ -213,21 +269,59 @@ function loadGroups() {
             `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>` : '';
 
         return `
-                <div class="group-item" onclick="selectGroup('${g.id}')" 
-                     style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle}">
-                    <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}">${escapeHtml(g.name)}</span>
-                    ${deleteBtn}
-                </div>
-                `;
+                    <div class="group-item" onclick="selectGroup('${g.id}')" 
+                         style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle}">
+                        <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}">${escapeHtml(g.name)}</span>
+                        ${deleteBtn}
+                    </div>
+                    `;
     }).join('')}
+            </div>
         </div>
     `;
 
     document.getElementById('groups-list').innerHTML = listHtml;
+    const content = document.getElementById('group-accordion-content');
+    if (content) {
+        content.style.maxHeight = groupAccordionOpen ? (content.scrollHeight + 'px') : '0px';
+        content.dataset.open = groupAccordionOpen ? 'true' : 'false';
+    }
+    const badge = document.getElementById('groups-count-badge');
+    if (badge) {
+        badge.textContent = `${groups.length}个分组`;
+        badge.style.display = groupAccordionOpen ? 'none' : 'inline-flex';
+    }
+    const header = document.getElementById('group-accordion-header');
+    const icon = header ? header.querySelector('.chevron-icon') : null;
+    if (icon) {
+        icon.style.transform = groupAccordionOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
+    }
 
     // 只有超管可以添加分组
     const addGroupBtn = document.querySelector('button[onclick="showAddGroup()"]');
     if (addGroupBtn) addGroupBtn.style.display = user.role === 'super_admin' ? 'block' : 'none';
+}
+
+function toggleGroupAccordion() {
+    const content = document.getElementById('group-accordion-content');
+    const header = document.getElementById('group-accordion-header');
+    const icon = header ? header.querySelector('.chevron-icon') : null;
+    const badge = document.getElementById('groups-count-badge');
+    if (!content) return;
+    const isOpen = content.dataset.open === 'true';
+    if (isOpen) {
+        content.style.maxHeight = '0px';
+        content.dataset.open = 'false';
+        groupAccordionOpen = false;
+        if (icon) icon.style.transform = 'rotate(-90deg)';
+        if (badge) badge.style.display = 'inline-flex';
+    } else {
+        content.style.maxHeight = content.scrollHeight + 'px';
+        content.dataset.open = 'true';
+        groupAccordionOpen = true;
+        if (icon) icon.style.transform = 'rotate(0deg)';
+        if (badge) badge.style.display = 'none';
+    }
 }
 
 function selectGroup(id) {
@@ -279,6 +373,7 @@ function renderUsers() {
     const query = document.getElementById('user-search-input')?.value.trim().toLowerCase();
     const groups = cachedData.groups;
     const currentUser = Storage.getCurrentUser();
+    const isMobile = window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : (window.innerWidth <= 768);
     const getGroupName = (gid) => groups.find(g => g.id === gid)?.name || '-';
 
     // 优先处理搜索（全局搜索），若无搜索词则按分组过滤
@@ -290,8 +385,50 @@ function renderUsers() {
     } else if (selectedGroupId) {
         users = users.filter(u => u.groupId === selectedGroupId);
     }
+        
+    const html = users.length ? (isMobile
+        ? `<div class="user-cards">${users.map(u => {
+        const isSuper = u.role === 'super_admin';
+        const isGroupAdmin = u.role === 'group_admin';
+        const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
 
-    const html = users.length ? `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="text-center user-actions-header">操作</th></tr></thead>
+        const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
+            isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
+
+        const isSelf = currentUser && currentUser.id === u.id;
+
+        // 权限判断
+        const canManageRole = currentUser.role === 'super_admin' && !isSelf;
+        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
+        const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
+
+        const actions = [];
+        if (canManageRole) {
+            actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+            actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+        }
+        if (canEdit) {
+            actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+        }
+        if (canDelete) {
+            actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+        }
+
+        const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
+        const groupName = escapeHtml(getGroupName(u.groupId));
+
+        return `
+          <div class="user-card">
+            <div class="user-card-header">
+              <div class="user-name" style="${nameStyle}">${escapeHtml(u.username)} ${roleBadge}</div>
+              <span class="user-group-tag">${groupName || '-'}</span>
+            </div>
+            <div class="user-card-actions">
+              <div class="user-actions">${actions.join('') || '<span class="text-muted">无</span>'}</div>
+            </div>
+          </div>`;
+    }).join('')}</div>`
+        : `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="text-center user-actions-header">操作</th></tr></thead>
     <tbody>${users.map(u => {
         const isSuper = u.role === 'super_admin';
         const isGroupAdmin = u.role === 'group_admin';
@@ -307,25 +444,59 @@ function renderUsers() {
         const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
         const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
 
-        return `<tr>
-        <td style="${nameStyle}">
-            ${escapeHtml(u.username)} 
-            ${roleBadge}
-        </td>
-        <td>${escapeHtml(getGroupName(u.groupId))}</td>
-        <td class="text-center">
-          <div class="user-actions">
-            ${canManageRole ? `
-                <button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>
-                <button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>
-            ` : ''}
-            ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>` : ''}
-            ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>` : ''}
-          </div>
-        </td></tr>`;
-    }).join('')}</tbody></table></div>` : '<p class="text-muted">暂无用户</p>';
+        const actions = [];
+        if (canManageRole) {
+            actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+            actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+        }
+        if (canEdit) {
+            actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+        }
+        if (canDelete) {
+            actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+        }
+
+        if (isMobile) {
+            const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
+            return `<tr>
+            <td style="${nameStyle}">
+                ${escapeHtml(u.username)} 
+                ${roleBadge}
+            </td>
+            <td>${escapeHtml(getGroupName(u.groupId))}</td>
+            <td class="text-center">
+              <div class="user-actions">
+                <div class="user-action-group" id="uag-${u.id}">
+                  <button class="btn btn-sm btn-secondary user-action-more" onclick="toggleUserActionMenu('${u.id}')">⋯</button>
+                  <div class="user-action-more-menu" id="uam-${u.id}">${moreMenu}</div>
+                </div>
+              </div>
+            </td></tr>`;
+        } else {
+            const all = actions.join('');
+            return `<tr>
+            <td style="${nameStyle}">
+                ${escapeHtml(u.username)} 
+                ${roleBadge}
+            </td>
+            <td>${escapeHtml(getGroupName(u.groupId))}</td>
+            <td class="text-center"><div class="user-actions">${all || '<span class="text-muted">无</span>'}</div></td></tr>`;
+        }
+    }).join('')}</tbody></table></div>`) : '<p class="text-muted">暂无用户</p>';
     document.getElementById('users-list').innerHTML = html;
 }
+
+function toggleUserActionMenu(id) {
+    const group = document.getElementById(`uag-${id}`);
+    if (group) group.classList.toggle('open');
+}
+
+document.addEventListener('click', (e) => {
+    const grp = e.target.closest('.user-action-group');
+    if (!grp) {
+        document.querySelectorAll('.user-action-group.open').forEach(g => g.classList.remove('open'));
+    }
+});
 
 async function toggleUserRole(id, targetRole) {
     const user = cachedData.users.find(u => u.id === id);

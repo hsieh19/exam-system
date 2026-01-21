@@ -8,6 +8,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const dbConfig = require('../config/db-config');
 
@@ -27,17 +28,25 @@ let currentDbType = null;
 
 // ==================== 辅助函数 ====================
 
-function hashPassword(password) {
+async function hashPassword(password) {
     if (!password) return '';
-    return crypto.createHash('sha256').update(password).digest('hex');
+    const salt = await bcrypt.genSalt(10);
+    return await bcrypt.hash(password, salt);
 }
 
-function verifyPassword(inputPassword, storedPassword) {
+async function verifyPassword(inputPassword, storedPassword) {
     if (!storedPassword) return !inputPassword;
+    // 兼容旧的 sha256 哈希 (64位十六进制)
     if (storedPassword.length === 64 && /^[a-f0-9]+$/.test(storedPassword)) {
-        return hashPassword(inputPassword) === storedPassword;
+        const oldHash = crypto.createHash('sha256').update(inputPassword).digest('hex');
+        return oldHash === storedPassword;
     }
-    return inputPassword === storedPassword;
+    // 使用 bcrypt 验证
+    try {
+        return await bcrypt.compare(inputPassword, storedPassword);
+    } catch (e) {
+        return inputPassword === storedPassword; // 最后的兜底：明文对比（仅限极早期数据）
+    }
 }
 
 function sanitizeUser(user) {
@@ -147,6 +156,11 @@ const sqliteAdapter = {
                 ip TEXT,
                 createdAt TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_users_groupId ON users(groupId);
+            CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions(groupId);
+            CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers(groupId);
+            CREATE INDEX IF NOT EXISTS idx_records_paperId ON records(paperId);
+            CREATE INDEX IF NOT EXISTS idx_records_userId ON records(userId);
         `;
         this.db.run(tables);
 
@@ -169,7 +183,7 @@ const sqliteAdapter = {
         // 确保有管理员账号
         const admin = this.db.exec("SELECT * FROM users WHERE username = 'admin'");
         if (!admin.length || !admin[0].values.length) {
-            const hashedPwd = hashPassword('admin123');
+            const hashedPwd = await hashPassword('admin123');
             this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
                 ['admin-001', 'admin', hashedPwd, 'super_admin']);
         }
@@ -177,7 +191,7 @@ const sqliteAdapter = {
         // 确保有演示学生账号
         const student = this.db.exec("SELECT * FROM users WHERE username = 'student'");
         if (!student.length || !student[0].values.length) {
-            const hashedPwd = hashPassword('123456');
+            const hashedPwd = await hashPassword('123456');
             this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
                 ['student-001', 'student', hashedPwd, 'student']);
         }
@@ -332,17 +346,29 @@ const mysqlAdapter = {
                 details TEXT,
                 ip VARCHAR(100),
                 createdAt VARCHAR(50) NOT NULL
-            )`
+            )`,
+            `CREATE INDEX idx_users_groupId ON users(groupId)`,
+            `CREATE INDEX idx_questions_groupId ON questions(groupId)`,
+            `CREATE INDEX idx_papers_groupId ON papers(groupId)`,
+            `CREATE INDEX idx_records_paperId ON records(paperId)`,
+            `CREATE INDEX idx_records_userId ON records(userId)`
         ];
 
         for (const sql of tables) {
-            await this.pool.execute(sql);
+            try {
+                await this.pool.execute(sql);
+            } catch (e) {
+                // Ignore error if index already exists
+                if (!e.message.includes('already exists') && !e.message.includes('Duplicate key name')) {
+                    console.error('Error creating table/index:', e.message);
+                }
+            }
         }
 
         // 确保有管理员账号
         const [rows] = await this.pool.execute("SELECT * FROM users WHERE username = 'admin'");
         if (rows.length === 0) {
-            const hashedPwd = hashPassword('admin123');
+            const hashedPwd = await hashPassword('admin123');
             await this.pool.execute(
                 "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
                 ['admin-001', 'admin', hashedPwd, 'super_admin']
@@ -352,7 +378,7 @@ const mysqlAdapter = {
         // 确保有演示学生账号
         const [studentRows] = await this.pool.execute("SELECT * FROM users WHERE username = 'student'");
         if (studentRows.length === 0) {
-            const hashedPwd = hashPassword('123456');
+            const hashedPwd = await hashPassword('123456');
             await this.pool.execute(
                 "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
                 ['student-001', 'student', hashedPwd, 'student']
@@ -483,7 +509,12 @@ const postgresAdapter = {
                 details TEXT,
                 ip VARCHAR(100),
                 "createdAt" VARCHAR(50) NOT NULL
-            )`
+            )`,
+            `CREATE INDEX IF NOT EXISTS idx_users_groupId ON users("groupId")`,
+            `CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions("groupId")`,
+            `CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers("groupId")`,
+            `CREATE INDEX IF NOT EXISTS idx_records_paperId ON records("paperId")`,
+            `CREATE INDEX IF NOT EXISTS idx_records_userId ON records("userId")`
         ];
 
         for (const sql of tables) {
@@ -493,7 +524,7 @@ const postgresAdapter = {
         // 确保有管理员账号
         const result = await this.pool.query("SELECT * FROM users WHERE username = 'admin'");
         if (result.rows.length === 0) {
-            const hashedPwd = hashPassword('admin123');
+            const hashedPwd = await hashPassword('admin123');
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
                 ['admin-001', 'admin', hashedPwd, 'super_admin']
@@ -503,7 +534,7 @@ const postgresAdapter = {
         // 确保有演示学生账号
         const studentResult = await this.pool.query("SELECT * FROM users WHERE username = 'student'");
         if (studentResult.rows.length === 0) {
-            const hashedPwd = hashPassword('123456');
+            const hashedPwd = await hashPassword('123456');
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
                 ['student-001', 'student', hashedPwd, 'student']
@@ -678,7 +709,7 @@ module.exports = {
     },
     addUser: async (user) => {
         const id = user.id || generateId('u_');
-        const hashedPwd = hashPassword(user.password);
+        const hashedPwd = await hashPassword(user.password);
         await run("INSERT INTO users (id, username, password, role, groupId) VALUES (?, ?, ?, ?, ?)",
             [id, user.username, hashedPwd, user.role || 'student', user.groupId || null]);
         return { id, ...user, password: undefined };
@@ -688,7 +719,7 @@ module.exports = {
     },
     updateUser: async (user) => {
         if (user.password) {
-            const hashedPwd = hashPassword(user.password);
+            const hashedPwd = await hashPassword(user.password);
             await run("UPDATE users SET username=?, password=?, role=?, groupId=? WHERE id=?",
                 [user.username, hashedPwd, user.role, user.groupId, user.id]);
         } else {
@@ -701,7 +732,7 @@ module.exports = {
         const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
         if (rows.length === 0) return null;
         const user = rows[0];
-        if (verifyPassword(password, user.password)) {
+        if (await verifyPassword(password, user.password)) {
             return sanitizeUser(user);
         }
         return null;

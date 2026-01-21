@@ -44,7 +44,8 @@ app.get('/api/version', (req, res) => {
         const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
         res.json({ version: pkg.version });
     } catch (e) {
-        res.status(500).json({ error: '无法读取版本号' });
+        console.error('获取版本号失败:', e);
+        res.status(500).json({ error: '服务内部错误' });
     }
 });
 
@@ -64,6 +65,16 @@ async function startServer() {
     // ==================== 认证中间件 ====================
     // 初始化 Session Store (支持 Redis/Memory)
     const sessionStore = await createSessionStore();
+    const sseClients = new Set();
+    const broadcast = (event, payload) => {
+        const data = JSON.stringify({ event, payload, ts: Date.now() });
+        sseClients.forEach(res => {
+            try {
+                res.write(`event: ${event}\n`);
+                res.write(`data: ${data}\n\n`);
+            } catch (e) { }
+        });
+    };
 
     // ==================== 认证中间件 ====================
 
@@ -138,6 +149,25 @@ async function startServer() {
         }
     };
 
+    app.get('/events', async (req, res) => {
+        const token = req.query.token;
+        try {
+            const session = await sessionStore.get(token);
+            if (!token || !session) return res.status(401).end();
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            if (res.flushHeaders) res.flushHeaders();
+            res.write('retry: 5000\n\n');
+            sseClients.add(res);
+            req.on('close', () => {
+                sseClients.delete(res);
+            });
+        } catch (e) {
+            console.error('SSE Error:', e);
+            res.status(500).end();
+        }
+    });
     // 对 /api 下的所有请求应用鉴权（除了在中间件里排除的）
     app.use('/api', authMiddleware);
 
@@ -182,7 +212,8 @@ async function startServer() {
             await logAction('switch', 'database', dbType, req.user, { dbType }, getClientIp(req));
             res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
         } catch (e) {
-            res.status(500).json({ error: e.message });
+            console.error('切换数据库失败:', e);
+            res.status(500).json({ error: '切换数据库失败，请检查配置' });
         }
     });
 
@@ -218,8 +249,10 @@ async function startServer() {
             // 清除所有会话，强制重新登录
             await sessionStore.clear();
             res.json({ success: true, message: '数据库导入成功，请重新登录' });
+            broadcast('db_change', { resource: 'all' });
         } catch (e) {
-            res.status(500).json({ error: e.message });
+            console.error('切换数据库失败:', e);
+            res.status(500).json({ error: '切换数据库失败，请检查配置' });
         }
     });
 
@@ -246,6 +279,7 @@ async function startServer() {
         // 记录日志
         await logAction('create', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
         res.json(result);
+        broadcast('db_change', { resource: 'users' });
     });
 
     app.delete('/api/users/:id', adminMiddleware, async (req, res) => {
@@ -270,6 +304,7 @@ async function startServer() {
         // 记录日志
         await logAction('delete', 'user', req.params.id, req.user, { username: targetUser.username }, getClientIp(req));
         res.json({ success: true });
+        broadcast('db_change', { resource: 'users' });
     });
 
     app.put('/api/users/:id', adminMiddleware, async (req, res) => {
@@ -301,6 +336,7 @@ async function startServer() {
         // 记录日志
         await logAction('update', 'user', req.params.id, req.user, { username: updateData.username }, getClientIp(req));
         res.json(result);
+        broadcast('db_change', { resource: 'users' });
     });
 
     app.post('/api/login', async (req, res) => {
@@ -342,12 +378,15 @@ async function startServer() {
 
     app.post('/api/groups', superAdminMiddleware, async (req, res) => {
         const group = { id: generateId('g_'), ...req.body };
-        res.json(await db.addGroup(group));
+        const result = await db.addGroup(group);
+        res.json(result);
+        broadcast('db_change', { resource: 'groups' });
     });
 
     app.delete('/api/groups/:id', superAdminMiddleware, async (req, res) => {
         await db.deleteGroup(req.params.id);
         res.json({ success: true });
+        broadcast('db_change', { resource: 'groups' });
     });
 
     // ==================== 题目接口 ====================
@@ -375,6 +414,7 @@ async function startServer() {
         const result = await db.addQuestion(question);
         await logAction('create', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
         res.json(result);
+        broadcast('db_change', { resource: 'questions' });
     });
 
     app.put('/api/questions/:id', adminMiddleware, async (req, res) => {
@@ -393,12 +433,14 @@ async function startServer() {
         const result = await db.updateQuestion(question);
         await logAction('update', 'question', req.params.id, req.user, { type: question.type }, getClientIp(req));
         res.json(result);
+        broadcast('db_change', { resource: 'questions' });
     });
 
     app.delete('/api/questions/all', superAdminMiddleware, async (req, res) => {
         await db.deleteAllQuestions();
         await logAction('delete_all', 'question', null, req.user, {}, getClientIp(req));
         res.json({ success: true });
+        broadcast('db_change', { resource: 'questions' });
     });
 
     app.delete('/api/questions/:id', adminMiddleware, async (req, res) => {
@@ -412,6 +454,7 @@ async function startServer() {
         await db.deleteQuestion(req.params.id);
         await logAction('delete', 'question', req.params.id, req.user, {}, getClientIp(req));
         res.json({ success: true });
+        broadcast('db_change', { resource: 'questions' });
     });
 
     // ==================== 专业分类接口 ====================
@@ -429,17 +472,22 @@ async function startServer() {
 
     app.post('/api/categories', superAdminMiddleware, async (req, res) => {
         const cat = { id: generateId('cat_'), ...req.body };
-        res.json(await db.addCategory(cat));
+        const result = await db.addCategory(cat);
+        res.json(result);
+        broadcast('db_change', { resource: 'categories' });
     });
 
     app.put('/api/categories/:id', superAdminMiddleware, async (req, res) => {
         const cat = { ...req.body, id: req.params.id };
-        res.json(await db.updateCategory(cat));
+        const result = await db.updateCategory(cat);
+        res.json(result);
+        broadcast('db_change', { resource: 'categories' });
     });
 
     app.delete('/api/categories/:id', superAdminMiddleware, async (req, res) => {
         await db.deleteCategory(req.params.id);
         res.json({ success: true });
+        broadcast('db_change', { resource: 'categories' });
     });
 
     // ==================== 试卷接口 ====================
@@ -480,6 +528,7 @@ async function startServer() {
         const result = await db.addPaper(paper);
         await logAction('create', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
         res.json(result);
+        broadcast('db_change', { resource: 'papers' });
     });
 
     app.put('/api/papers/:id', adminMiddleware, async (req, res) => {
@@ -494,7 +543,9 @@ async function startServer() {
         if (req.user.role !== 'super_admin') {
             paper.groupId = req.user.groupId;
         }
-        res.json(await db.updatePaper(paper));
+        const result = await db.updatePaper(paper);
+        res.json(result);
+        broadcast('db_change', { resource: 'papers' });
     });
 
     app.put('/api/papers/:id/publish', adminMiddleware, async (req, res) => {
@@ -543,6 +594,7 @@ async function startServer() {
         await logAction('publish', 'paper', req.params.id, req.user, { name: existing.name, targetGroups }, getClientIp(req));
 
         res.json(paper);
+        broadcast('db_change', { resource: 'papers' });
     });
 
     app.get('/api/papers/:id/push-logs', adminMiddleware, async (req, res) => {
@@ -568,6 +620,7 @@ async function startServer() {
         await db.deletePaper(req.params.id);
         await logAction('delete', 'paper', req.params.id, req.user, { name: existing.name }, getClientIp(req));
         res.json({ success: true });
+        broadcast('db_change', { resource: 'papers' });
     });
 
     app.get('/api/papers/user/:userId', async (req, res) => {
@@ -757,10 +810,26 @@ async function startServer() {
     });
 
     app.delete('/api/logs', superAdminMiddleware, async (req, res) => {
-        const { beforeDate } = req.body;
-        await db.clearSystemLogs(beforeDate);
-        await logAction('clear', 'logs', null, req.user, { beforeDate }, getClientIp(req));
-        res.json({ success: true });
+        try {
+            const { beforeDate } = req.body;
+            await db.clearSystemLogs(beforeDate);
+            await logAction('clear', 'logs', null, req.user, { beforeDate }, getClientIp(req));
+            res.json({ success: true });
+        } catch (e) {
+            console.error('清理日志失败:', e);
+            res.status(500).json({ error: '服务内部错误' });
+        }
+    });
+
+    // ==================== 全局错误处理 ====================
+    app.use((err, req, res, next) => {
+        console.error('Unhandled Error:', err);
+        const status = err.status || 500;
+        const message = status === 500 ? '服务器内部错误' : err.message;
+        res.status(status).json({
+            error: message,
+            timestamp: new Date().toISOString()
+        });
     });
 
     app.listen(PORT, HOST, () => {
@@ -772,5 +841,5 @@ async function startServer() {
 }
 
 startServer().catch(err => {
-    console.error('启动失败:', err);
+    console.error('系统启动失败:', err);
 });

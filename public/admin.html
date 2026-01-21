@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>企业考试系统 - 管理员</title>
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -89,27 +89,33 @@
                 <div class="card users-split-card">
                     <!-- 左侧边栏：分组管理 -->
                     <div class="users-groups-pane">
-                        <div
-                            style="padding:20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                            <span class="card-title" style="font-size:16px;">分组管理</span>
+                        <div class="users-pane-header">
+                            <div class="groups-header-left" id="group-accordion-header" onclick="toggleGroupAccordion()">
+                                <span class="card-title" style="font-size:16px;">分组管理</span>
+                                <span class="badge badge-transparent" id="groups-count-badge" style="display:none;"></span>
+                                <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </div>
                             <button class="btn btn-primary btn-sm" onclick="showAddGroup()">添加分组</button>
                         </div>
-                        <div class="card-body" id="groups-list" style="padding:20px; flex:1; overflow-y:auto;"></div>
+                        <div class="card-body" id="groups-list"></div>
                     </div>
 
                     <!-- 右侧内容区：用户管理 -->
                     <div class="users-users-pane">
-                        <div class="users-users-header"
-                            style="padding:20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                        <div class="users-pane-header users-users-header">
                             <div class="users-users-header-left" style="display:flex;align-items:center;gap:16px;">
                                 <span class="card-title" style="font-size:16px;">用户管理</span>
-                                <input type="text" class="form-input users-user-search" id="user-search-input"
-                                    placeholder="搜索用户" onkeyup="filterUsers()"
-                                    style="padding:8px 12px;font-size:14px;">
                             </div>
                             <button class="btn btn-primary btn-sm" onclick="showAddUser()">添加用户</button>
                         </div>
-                        <div class="card-body" id="users-list" style="padding:20px; flex:1; overflow-y:auto;"></div>
+                        <div class="users-searchbar">
+                            <input type="text" class="form-input users-user-search" id="user-search-input"
+                                   placeholder="搜索用户" onkeyup="filterUsers()"
+                                   style="padding:8px 12px;font-size:14px;">
+                        </div>
+                        <div class="card-body" id="users-list"></div>
                     </div>
                 </div>
             </div>
