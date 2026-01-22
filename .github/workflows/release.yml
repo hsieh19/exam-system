@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -29,10 +31,7 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            dist/exam-system-win.exe
-            dist/exam-system-linux
-            dist/exam-system-macos
+          files: dist/*
           draft: false
           prerelease: false
         env:
