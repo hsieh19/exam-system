@@ -13,8 +13,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 默认监听所有网络接口
 
-// 文件上传配置 (使用磁盘缓存，避免内存溢出)
-const TEMP_UPLOADS = path.join(__dirname, '../temp_uploads');
+const isPkg = typeof process.pkg !== 'undefined';
+const baseDir = isPkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+const TEMP_UPLOADS = path.join(baseDir, 'temp_uploads');
 // 启动时确保存储目录存在
 try {
     if (!fs.existsSync(TEMP_UPLOADS)) {
