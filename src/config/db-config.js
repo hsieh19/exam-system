@@ -26,26 +26,38 @@ function getCurrentDbType() {
 
 // 获取 MySQL 配置（从环境变量）
 function getMysqlConfig() {
-    return {
+    const config = {
         host: process.env.MYSQL_HOST || 'localhost',
         port: parseInt(process.env.MYSQL_PORT) || 3306,
         user: process.env.MYSQL_USER || 'root',
-        password: process.env.MYSQL_PASSWORD || '',
+        password: process.env.MYSQL_PASSWORD, // 生产环境不应默认为空
         database: process.env.MYSQL_DATABASE || 'exam_system',
         connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10
     };
+
+    // 生产环境强制检查密码
+    if (process.env.NODE_ENV === 'production' && !config.password) {
+        console.warn('警告: 生产环境下 MySQL 密码未配置！');
+    }
+    return config;
 }
 
 // 获取 PostgreSQL 配置（从环境变量）
 function getPostgresConfig() {
-    return {
+    const config = {
         host: process.env.POSTGRES_HOST || 'localhost',
         port: parseInt(process.env.POSTGRES_PORT) || 5432,
         user: process.env.POSTGRES_USER || 'postgres',
-        password: process.env.POSTGRES_PASSWORD || '',
+        password: process.env.POSTGRES_PASSWORD, // 生产环境不应默认为空
         database: process.env.POSTGRES_DATABASE || 'exam_system',
         max: parseInt(process.env.DB_CONNECTION_LIMIT) || 10
     };
+
+    // 生产环境强制检查密码
+    if (process.env.NODE_ENV === 'production' && !config.password) {
+        console.warn('警告: 生产环境下 PostgreSQL 密码未配置！');
+    }
+    return config;
 }
 
 // 获取特定数据库的连接配置

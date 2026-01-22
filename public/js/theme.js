@@ -84,8 +84,46 @@ const ThemeSwitcher = {
     switcher.appendChild(icon);
     switcher.appendChild(select);
 
-    // 添加到页面
-    document.body.appendChild(switcher);
+    const ensureRoot = () => {
+      let root = document.getElementById('theme-switcher-root');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'theme-switcher-root';
+        root.className = 'theme-switcher-root';
+      }
+      if (root.parentElement !== document.body) document.body.appendChild(root);
+      return root;
+    };
+
+    const clearInlineStyle = () => {
+      switcher.style.removeProperty('position');
+      switcher.style.removeProperty('top');
+      switcher.style.removeProperty('right');
+      switcher.style.removeProperty('z-index');
+    };
+
+    const mountSwitcher = () => {
+      const headerActions = document.getElementById('mobile-header-actions');
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      if (isMobile && headerActions) {
+        headerActions.appendChild(switcher);
+        clearInlineStyle();
+      } else {
+        const root = ensureRoot();
+        if (switcher.parentElement !== root) root.appendChild(switcher);
+        clearInlineStyle();
+      }
+    };
+
+    mountSwitcher();
+    if (window.matchMedia) {
+      const mql = window.matchMedia('(max-width: 768px)');
+      const handleChange = () => {
+        mountSwitcher();
+      };
+      if (mql.addEventListener) mql.addEventListener('change', handleChange);
+      else mql.addListener(handleChange);
+    }
   },
 
   /**

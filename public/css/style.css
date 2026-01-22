@@ -4,6 +4,7 @@
 
 /* CSS 变量 - 企业级深色主题 */
 :root {
+  color-scheme: dark;
   /* 主色调 */
   --primary: #3b82f6;
   --primary-hover: #2563eb;
@@ -57,6 +58,7 @@
    主题变量 - 浅色主题
    =========================== */
 [data-theme="light"] {
+  color-scheme: light;
   /* 主色调 */
   --primary: #3b82f6;
   --primary-hover: #2563eb;
@@ -97,6 +99,7 @@
    主题变量 - 深蓝主题
    =========================== */
 [data-theme="ocean"] {
+  color-scheme: dark;
   /* 主色调 */
   --primary: #06b6d4;
   --primary-hover: #0891b2;
@@ -137,10 +140,7 @@
    主题切换器样式
    =========================== */
 .theme-switcher {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 9999;
+  position: static;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -150,6 +150,13 @@
   padding: 8px 12px;
   box-shadow: var(--shadow-md);
   transition: var(--transition);
+}
+
+.theme-switcher-root {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
 }
 
 .theme-switcher:hover {
@@ -195,11 +202,7 @@
   right: 24px;
 }
 
-/* 主内容区主题切换器位置调整 */
-.app-layout .theme-switcher {
-  top: 20px;
-  right: 32px;
-}
+/* 移除旧的特定页面位置调整，现在由 JS 处理容器关系 */
 
 /* 平滑的主题过渡动画 */
 html {
@@ -734,6 +737,105 @@ a:hover {
 
 .logs-table {
   display: block;
+}
+
+/* 系统日志筛选器布局 - PC端优先 */
+#page-logs .card-header.logs-filter-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px;
+}
+
+/* 第一行：左侧筛选，右侧操作按钮 */
+#page-logs .card-header .logs-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+/* 按钮组推向右侧 */
+#page-logs .logs-reset-btn {
+  margin-left: auto;
+}
+
+/* PC端控件尺寸 */
+#page-logs .card-header .logs-filter-control {
+  height: 36px;
+  padding: 8px 12px;
+  width: 150px;
+}
+
+#page-logs .card-header .logs-filter-btn {
+  height: 36px;
+  padding: 8px 16px;
+  width: auto;
+  /* 按钮宽度由内容决定，避免等宽难看 */
+  min-width: 80px;
+}
+
+#page-logs .logs-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 将重置与清理按钮推向右侧 */
+#page-logs .logs-reset-btn {
+  margin-left: auto;
+}
+
+/* 日期选择器尺寸 */
+
+#page-logs .logs-date-range {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-input) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md);
+  padding: 0 8px;
+  height: 38px;
+  transition: var(--transition);
+}
+
+#page-logs .logs-date-range .form-input {
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  padding: 0 4px !important;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  width: 145px !important;
+  cursor: pointer;
+}
+
+/* 依靠系统 color-scheme 自动处理图标颜色 */
+#page-logs .logs-date-range .form-input::-webkit-calendar-picker-indicator {
+  cursor: pointer !important;
+  opacity: 0.9 !important;
+  transition: var(--transition);
+}
+
+#page-logs .logs-date-range .form-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1 !important;
+}
+
+.logs-date-sep {
+  color: var(--text-primary);
+  /* 提高“至”字的亮度 */
+  font-size: 13px;
+  padding: 0 4px;
+  opacity: 0.8;
+}
+
+.logs-date-range:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary-light);
 }
 
 .data-table {
@@ -1665,10 +1767,7 @@ a:hover {
     max-width: calc(100vw - 24px);
   }
 
-  .app-layout .theme-switcher {
-    top: 8px;
-    right: 8px;
-  }
+  /* 移除旧的移动端特定调整 */
 
   .users-split-card {
     flex-direction: column;
@@ -1962,17 +2061,13 @@ a:hover {
     border-color: rgba(100, 116, 139, 0.3);
   }
 
+  /* 移动端特定显隐逻辑 */
   .logs-cards {
     display: flex;
   }
 
   .logs-table {
     display: none;
-  }
-
-  #page-logs .card-header select.form-select {
-    width: auto !important;
-    min-width: 0 !important;
   }
 
   #page-logs #logs-list .logs-cards {
@@ -1982,11 +2077,16 @@ a:hover {
   }
 
   .log-card {
-    border: 1px solid rgba(100, 116, 139, 0.25);
-    background: rgba(0, 0, 0, 0.05);
-    border-radius: 16px;
-    padding: 12px 12px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+  }
+
+  .log-card:active {
+    transform: scale(0.99);
   }
 
   .log-card-top {
@@ -2436,6 +2536,87 @@ a:hover {
   }
 }
 
+@media (max-width: 768px) {
+  #page-logs .card-header .logs-btn-icon {
+    display: none;
+  }
+
+  #page-logs .card-header .form-select {
+    padding: 8px !important;
+  }
+
+  #page-logs .card-header .btn-sm {
+    padding: 8px !important;
+  }
+
+  /* 移动端日志筛选：四个元素强制在一行，全宽排列 */
+  /* 移动端日志筛选：重构为两行布局 */
+  #page-logs .card-header .logs-filter-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    /* 允许换行 */
+    justify-content: space-between;
+    gap: 8px 6px;
+    /* 增加行间距 */
+    width: 100%;
+  }
+
+  /* 逻辑排序：确保选项和按钮在第一行，日期在第二行 */
+  #log-target-filter {
+    order: 1;
+  }
+
+  #log-action-filter {
+    order: 2;
+  }
+
+  #page-logs .logs-reset-btn {
+    order: 3;
+    margin-left: 0;
+  }
+
+  #page-logs .logs-clear-btn {
+    order: 4;
+  }
+
+  #page-logs .logs-date-range {
+    order: 5;
+    width: 100% !important;
+    margin-top: 4px;
+    justify-content: center;
+  }
+
+  #page-logs .card-header .logs-reset-btn {
+    margin-left: 0;
+  }
+
+  #page-logs .card-header .logs-filter-control,
+  #page-logs .card-header .logs-filter-btn {
+    flex: 1;
+    /* 平分空间 */
+    width: auto;
+    min-width: 0;
+    height: 36px;
+    padding: 8px 2px;
+    /* 减小水平内边距 */
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* 移动端下拉框特定优化 */
+  #page-logs .card-header select.form-select {
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 8px 14px 8px 4px !important;
+    /* 调整内边距适应窄屏 */
+    background-position: right 2px center;
+  }
+
+  #page-logs .card-header .logs-date-row {
+    width: 100%;
+  }
+}
+
 /* 数据库配置显示 */
 .config-item {
   display: flex;
@@ -2480,4 +2661,99 @@ a:hover {
 
 .dropdown-item.active:hover {
   background: var(--primary-hover);
+}
+
+/* ===========================
+   日志分页器样式
+   =========================== */
+#logs-pagination {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 16px 20px !important;
+  border-top: 1px solid var(--border) !important;
+  background: transparent;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.info-mini {
+  display: none;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-pages {
+  display: flex;
+  gap: 4px;
+}
+
+.pagination-controls .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+}
+
+.pagination-controls .btn svg {
+  display: none;
+  /* PC端默认不显示图标 */
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  #logs-pagination {
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 12px;
+    padding: 16px !important;
+  }
+
+  .pagination-info {
+    margin-bottom: 4px;
+    text-align: center;
+    font-weight: 500;
+  }
+
+  .info-full {
+    display: none;
+  }
+
+  .info-mini {
+    display: inline-block;
+  }
+
+  .pagination-controls {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .btn-prev .btn-text,
+  .btn-next .btn-text {
+    display: none;
+    /* 隐藏文字 */
+  }
+
+  .btn-prev svg,
+  .btn-next svg {
+    display: block !important;
+    /* 显示图标 */
+    margin: 0;
+  }
+
+  .pagination-controls .btn {
+    padding: 0;
+    width: 36px;
+    height: 36px;
+  }
 }

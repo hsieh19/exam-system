@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>企业考试系统 - 管理员</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="js/xlsx.full.min.js"></script>
 </head>
@@ -75,7 +75,8 @@
             <div id="version-info" class="version-info">
                 <!-- Version info will be populated by JS -->
             </div>
-            <div class="sidebar-footer">
+            <div class="sidebar-footer" id="sidebar-footer">
+                <div id="theme-switcher-container"></div>
                 <div class="user-info" id="user-info"></div>
             </div>
         </aside>
@@ -90,10 +91,13 @@
                     <!-- 左侧边栏：分组管理 -->
                     <div class="users-groups-pane">
                         <div class="users-pane-header">
-                            <div class="groups-header-left" id="group-accordion-header" onclick="toggleGroupAccordion()">
+                            <div class="groups-header-left" id="group-accordion-header"
+                                onclick="toggleGroupAccordion()">
                                 <span class="card-title" style="font-size:16px;">分组管理</span>
-                                <span class="badge badge-transparent" id="groups-count-badge" style="display:none;"></span>
-                                <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <span class="badge badge-transparent" id="groups-count-badge"
+                                    style="display:none;"></span>
+                                <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <polyline points="6 9 12 15 18 9"></polyline>
                                 </svg>
                             </div>
@@ -112,8 +116,7 @@
                         </div>
                         <div class="users-searchbar">
                             <input type="text" class="form-input users-user-search" id="user-search-input"
-                                   placeholder="搜索用户" onkeyup="filterUsers()"
-                                   style="padding:8px 12px;font-size:14px;">
+                                placeholder="搜索用户" onkeyup="filterUsers()" style="padding:8px 12px;font-size:14px;">
                         </div>
                         <div class="card-body" id="users-list"></div>
                     </div>
@@ -340,7 +343,8 @@
             <div id="page-database" class="page-content hidden">
                 <div class="page-header">
                     <h1>数据库设置</h1>
-                    <p style="color:var(--text-secondary);margin-top:8px;font-size:14px;">切换数据库后将自动初始化新数据库结构，原数据库数据不会迁移
+                    <p style="color:var(--text-secondary);margin-top:8px;font-size:14px;">
+                        切换数据库后将自动初始化新数据库结构，原数据库数据将自动迁移至新数据库
                     </p>
                 </div>
 
@@ -429,12 +433,10 @@
                     <h1 class="page-title">系统日志</h1>
                 </div>
                 <div class="card">
-                    <div class="card-header"
-                        style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:16px 20px;">
-                        <!-- 左侧：筛选条件 -->
-                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                            <select class="form-select" id="log-target-filter" onchange="updateLogActionOptions()"
-                                style="width:110px;">
+                    <div class="card-header logs-filter-header">
+                        <div class="logs-filter-row">
+                            <select class="form-select logs-filter-control" id="log-target-filter"
+                                onchange="updateLogActionOptions()">
                                 <option value="">全部对象</option>
                                 <option value="user">用户</option>
                                 <option value="question">题目</option>
@@ -442,8 +444,8 @@
                                 <option value="database">数据库</option>
                                 <option value="logs">日志</option>
                             </select>
-                            <select class="form-select" id="log-action-filter" onchange="loadSystemLogs()"
-                                style="width:120px;">
+                            <select class="form-select logs-filter-control" id="log-action-filter"
+                                onchange="loadSystemLogs()">
                                 <option value="">全部操作</option>
                                 <option value="login">登录</option>
                                 <option value="login_failed">登录失败</option>
@@ -455,33 +457,25 @@
                                 <option value="switch">切换</option>
                                 <option value="clear">清理</option>
                             </select>
-
-                            <!-- 整合的日期选择器 -->
-                            <div
-                                style="display:flex;align-items:center;border:1px solid var(--border);border-radius:4px;overflow:hidden;background:var(--input-bg, rgba(255,255,255,0.05));">
-                                <input type="date" id="log-start-date" onchange="loadSystemLogs()"
-                                    style="border:none;background:transparent;color:var(--text-primary);width:125px;padding:6px 10px;font-size:14px;outline:none;">
-                                <span style="color:var(--text-secondary);font-size:12px;padding:0 4px;">至</span>
-                                <input type="date" id="log-end-date" onchange="loadSystemLogs()"
-                                    style="border:none;background:transparent;color:var(--text-primary);width:125px;padding:6px 10px;font-size:14px;outline:none;">
+                            <!-- 日期选择器移入第一行 -->
+                            <div class="logs-date-range">
+                                <input type="date" id="log-start-date" class="form-input" onchange="loadSystemLogs()">
+                                <span class="logs-date-sep">至</span>
+                                <input type="date" id="log-end-date" class="form-input" onchange="loadSystemLogs()">
                             </div>
-                        </div>
-
-                        <!-- 右侧：操作按钮 -->
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <button class="btn btn-secondary btn-sm" onclick="resetLogFilters()" title="重置筛选"
-                                style="display:flex;align-items:center;gap:4px;">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                    stroke-width="2">
+                            <button class="btn btn-secondary btn-sm logs-filter-btn logs-reset-btn"
+                                onclick="resetLogFilters()" title="重置筛选">
+                                <svg class="logs-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                    stroke="currentColor" stroke-width="2">
                                     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
                                     <path d="M3 3v5h5"></path>
                                 </svg>
                                 <span>重置</span>
                             </button>
-                            <button class="btn btn-danger btn-sm" onclick="showClearLogsModal()"
-                                style="display:flex;align-items:center;gap:4px;">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                                    stroke-width="2">
+                            <button class="btn btn-danger btn-sm logs-filter-btn logs-clear-btn"
+                                onclick="showClearLogsModal()">
+                                <svg class="logs-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                                    stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"></polyline>
                                     <path
                                         d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
@@ -517,7 +511,7 @@
         </div>
     </div>
 
-    <script src="js/theme.js"></script>
+    <script src="js/theme.js?v=2"></script>
     <script src="js/storage.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/auth.js"></script>

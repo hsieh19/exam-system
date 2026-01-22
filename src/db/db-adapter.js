@@ -9,13 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
-const dbConfig = require('../config/db-config');
-
-// 统一 ID 生成函数（使用 UUID v4 确保唯一性）
-const generateId = (prefix = '') => {
-    return prefix + uuidv4().replace(/-/g, '').substring(0, 16);
-};
+const { generateId } = require('../utils/id-generator');
 
 // 数据库路径
 const isPkg = typeof process.pkg !== 'undefined';
@@ -165,35 +159,37 @@ const sqliteAdapter = {
         this.db.run(tables);
 
         // 数据库迁移：为现有表添加新字段（如果不存在）
-        try {
-            this.db.run("ALTER TABLE questions ADD COLUMN updatedAt TEXT");
-        } catch (e) {
-            if (!e.message.includes('duplicate column')) {
-                console.log('Migration: updatedAt column already exists or error:', e.message);
+        // 数据库迁移：为现有表添加新字段（如果不存在）
+        const checkAndAddColumn = (table, column, type) => {
+            try {
+                const columns = this.query(`PRAGMA table_info(${table})`);
+                const exists = columns && columns.some(c => c.name === column);
+                if (!exists) {
+                    console.log(`Migration: Adding column ${column} to table ${table}`);
+                    this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+                }
+            } catch (e) {
+                console.error(`Migration error for ${table}.${column}:`, e.message);
             }
-        }
-        try {
-            this.db.run("ALTER TABLE papers ADD COLUMN published INTEGER DEFAULT 0");
-        } catch (e) {
-            if (!e.message.includes('duplicate column')) {
-                console.log('Migration: published column already exists or error:', e.message);
-            }
-        }
+        };
+
+        checkAndAddColumn('questions', 'updatedAt', 'TEXT');
+        checkAndAddColumn('papers', 'published', 'INTEGER DEFAULT 0');
 
         // 确保有管理员账号
-        const admin = this.db.exec("SELECT * FROM users WHERE username = 'admin'");
-        if (!admin.length || !admin[0].values.length) {
-            const hashedPwd = await hashPassword('admin123');
-            this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', 'admin', hashedPwd, 'super_admin']);
-        }
+        const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+        const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        // 确保有演示学生账号
-        const student = this.db.exec("SELECT * FROM users WHERE username = 'student'");
-        if (!student.length || !student[0].values.length) {
-            const hashedPwd = await hashPassword('123456');
+        const admin = this.db.exec("SELECT * FROM users WHERE username = ?", [adminUsername]);
+        // 只有当查询结果为空，或者虽然有结果但values为空数组时，才插入
+        if (!admin.length || !admin[0].values.length) {
+            console.log(`正在初始化管理员账号: ${adminUsername}`);
+            const hashedPwd = await hashPassword(adminPassword);
+            // 检查如果不只有admin一个用户，应该生成新的ID，还是固定ID？
+            // 原逻辑是固定 'admin-001'，为了兼容性暂时保持，但如果adminUsername变了，ID也最好保持唯一或是特定。
+            // 这里我们保持 'admin-001' 作为初始超管的ID，以此标识它是系统初始化的
             this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['student-001', 'student', hashedPwd, 'student']);
+                ['admin-001', adminUsername, hashedPwd, 'super_admin']);
         }
 
         this.save();
@@ -366,22 +362,16 @@ const mysqlAdapter = {
         }
 
         // 确保有管理员账号
-        const [rows] = await this.pool.execute("SELECT * FROM users WHERE username = 'admin'");
-        if (rows.length === 0) {
-            const hashedPwd = await hashPassword('admin123');
-            await this.pool.execute(
-                "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', 'admin', hashedPwd, 'super_admin']
-            );
-        }
+        const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+        const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        // 确保有演示学生账号
-        const [studentRows] = await this.pool.execute("SELECT * FROM users WHERE username = 'student'");
-        if (studentRows.length === 0) {
-            const hashedPwd = await hashPassword('123456');
+        const [rows] = await this.pool.execute("SELECT * FROM users WHERE username = ?", [adminUsername]);
+        if (rows.length === 0) {
+            console.log(`正在初始化管理员账号: ${adminUsername}`);
+            const hashedPwd = await hashPassword(adminPassword);
             await this.pool.execute(
                 "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['student-001', 'student', hashedPwd, 'student']
+                ['admin-001', adminUsername, hashedPwd, 'super_admin']
             );
         }
     },
@@ -522,22 +512,16 @@ const postgresAdapter = {
         }
 
         // 确保有管理员账号
-        const result = await this.pool.query("SELECT * FROM users WHERE username = 'admin'");
-        if (result.rows.length === 0) {
-            const hashedPwd = await hashPassword('admin123');
-            await this.pool.query(
-                "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
-                ['admin-001', 'admin', hashedPwd, 'super_admin']
-            );
-        }
+        const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+        const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        // 确保有演示学生账号
-        const studentResult = await this.pool.query("SELECT * FROM users WHERE username = 'student'");
-        if (studentResult.rows.length === 0) {
-            const hashedPwd = await hashPassword('123456');
+        const result = await this.pool.query("SELECT * FROM users WHERE username = $1", [adminUsername]);
+        if (result.rows.length === 0) {
+            console.log(`正在初始化管理员账号: ${adminUsername}`);
+            const hashedPwd = await hashPassword(adminPassword);
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
-                ['student-001', 'student', hashedPwd, 'student']
+                ['admin-001', adminUsername, hashedPwd, 'super_admin']
             );
         }
     },
@@ -599,19 +583,87 @@ async function initDatabase() {
     return currentDb;
 }
 
+function getSafeName(name, dbType) {
+    if (dbType === 'mysql') return `\`${name}\``;
+    return `"${name}"`;
+}
+
 async function switchDatabase(newDbType) {
-    // 关闭当前连接
+    console.log(`[SwitchDB] Starting migration from ${currentDbType} to ${newDbType}...`);
+
+    // 1. Export Data from Old DB
+    const data = {};
     if (currentDb) {
+        try {
+            const tables = ['users', 'groups', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs'];
+            for (const table of tables) {
+                // Use safe table names
+                const tableName = getSafeName(table, currentDbType);
+                try {
+                    data[table] = await currentDb.query(`SELECT * FROM ${tableName}`);
+                } catch (e) {
+                    // Ignore missing tables (backward compatibility)
+                    console.warn(`[SwitchDB] Read table ${table} failed: ${e.message}`);
+                    data[table] = [];
+                }
+            }
+            console.log(`[SwitchDB] Data exported from ${currentDbType}.`);
+        } catch (e) {
+            console.error('[SwitchDB] Export failed:', e);
+            throw e;
+        }
         await currentDb.close();
     }
 
-    // 更新配置
+    // 2. Init New DB
     dbConfig.setActiveDb(newDbType);
-
-    // 初始化新数据库
     currentDbType = newDbType;
     currentDb = getAdapter(newDbType);
     await currentDb.init();
+
+    // 3. Clear Defaults & Import Data
+    try {
+        // Clear newly created default data (like admin/student from init) to avoid conflicts
+        // Order: Delete dependents first
+        const clearOrder = ['system_logs', 'push_logs', 'records', 'papers', 'questions', 'categories', 'users', 'groups'];
+        for (const table of clearOrder) {
+            const tableName = getSafeName(table, currentDbType);
+            await currentDb.run(`DELETE FROM ${tableName}`);
+        }
+
+        // Import
+        // Order: Insert independents first
+        const importOrder = ['groups', 'users', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs'];
+        for (const table of importOrder) {
+            const rows = data[table];
+            if (!rows || !rows.length) continue;
+
+            const tableName = getSafeName(table, currentDbType);
+            console.log(`[SwitchDB] Migrating ${rows.length} rows to ${table}...`);
+
+            for (const row of rows) {
+                const cols = Object.keys(row);
+                const vals = Object.values(row);
+                // Quote columns to avoid keyword conflicts
+                const colNames = cols.map(c => getSafeName(c, currentDbType)).join(',');
+                const placeholders = cols.map(() => '?').join(',');
+
+                await currentDb.run(`INSERT INTO ${tableName} (${colNames}) VALUES (${placeholders})`, vals);
+            }
+        }
+
+        // Manual Save for SQLite if needed (though run() usually saves)
+        if (currentDbType === 'sqlite' && currentDb.save) {
+            currentDb.save();
+        }
+
+        console.log('[SwitchDB] Migration successful.');
+
+    } catch (e) {
+        console.error('[SwitchDB] Import failed:', e);
+        // Crucial: If import fails, we might be in a broken state.
+        throw new Error('Data migration failed: ' + e.message);
+    }
 
     return true;
 }
