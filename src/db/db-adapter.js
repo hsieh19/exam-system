@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { generateId } = require('../utils/id-generator');
+const dbConfig = require('../config/db-config');
 
 // 数据库路径
 const isPkg = typeof process.pkg !== 'undefined';

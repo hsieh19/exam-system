@@ -9,7 +9,7 @@ let isRefreshing = false;
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.0.15', // 当前版本
+    version: '1.0.18', // 当前版本
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 
@@ -156,7 +156,7 @@ function initRealtime() {
         es.addEventListener('db_change', () => {
             refreshActivePage();
         });
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function ensureQuestionsFab() {
@@ -385,39 +385,39 @@ function renderUsers() {
     } else if (selectedGroupId) {
         users = users.filter(u => u.groupId === selectedGroupId);
     }
-        
+
     const html = users.length ? (isMobile
         ? `<div class="user-cards">${users.map(u => {
-        const isSuper = u.role === 'super_admin';
-        const isGroupAdmin = u.role === 'group_admin';
-        const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
+            const isSuper = u.role === 'super_admin';
+            const isGroupAdmin = u.role === 'group_admin';
+            const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
 
-        const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
-            isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
+            const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
+                isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
 
-        const isSelf = currentUser && currentUser.id === u.id;
+            const isSelf = currentUser && currentUser.id === u.id;
 
-        // 权限判断
-        const canManageRole = currentUser.role === 'super_admin' && !isSelf;
-        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
-        const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
+            // 权限判断
+            const canManageRole = currentUser.role === 'super_admin' && !isSelf;
+            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
+            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
 
-        const actions = [];
-        if (canManageRole) {
-            actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
-            actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
-        }
-        if (canEdit) {
-            actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
-        }
-        if (canDelete) {
-            actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
-        }
+            const actions = [];
+            if (canManageRole) {
+                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+            }
+            if (canEdit) {
+                actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+            }
+            if (canDelete) {
+                actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+            }
 
-        const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
-        const groupName = escapeHtml(getGroupName(u.groupId));
+            const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
+            const groupName = escapeHtml(getGroupName(u.groupId));
 
-        return `
+            return `
           <div class="user-card">
             <div class="user-card-header">
               <div class="user-name" style="${nameStyle}">${escapeHtml(u.username)} ${roleBadge}</div>
@@ -427,38 +427,38 @@ function renderUsers() {
               <div class="user-actions">${actions.join('') || '<span class="text-muted">无</span>'}</div>
             </div>
           </div>`;
-    }).join('')}</div>`
+        }).join('')}</div>`
         : `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="text-center user-actions-header">操作</th></tr></thead>
     <tbody>${users.map(u => {
-        const isSuper = u.role === 'super_admin';
-        const isGroupAdmin = u.role === 'group_admin';
-        const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
+            const isSuper = u.role === 'super_admin';
+            const isGroupAdmin = u.role === 'group_admin';
+            const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
 
-        const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
-            isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
+            const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
+                isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
 
-        const isSelf = currentUser && currentUser.id === u.id;
+            const isSelf = currentUser && currentUser.id === u.id;
 
-        // 权限判断
-        const canManageRole = currentUser.role === 'super_admin' && !isSelf;
-        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
-        const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
+            // 权限判断
+            const canManageRole = currentUser.role === 'super_admin' && !isSelf;
+            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
+            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
 
-        const actions = [];
-        if (canManageRole) {
-            actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
-            actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
-        }
-        if (canEdit) {
-            actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
-        }
-        if (canDelete) {
-            actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
-        }
+            const actions = [];
+            if (canManageRole) {
+                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+            }
+            if (canEdit) {
+                actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+            }
+            if (canDelete) {
+                actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+            }
 
-        if (isMobile) {
-            const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
-            return `<tr>
+            if (isMobile) {
+                const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
+                return `<tr>
             <td style="${nameStyle}">
                 ${escapeHtml(u.username)} 
                 ${roleBadge}
@@ -472,17 +472,17 @@ function renderUsers() {
                 </div>
               </div>
             </td></tr>`;
-        } else {
-            const all = actions.join('');
-            return `<tr>
+            } else {
+                const all = actions.join('');
+                return `<tr>
             <td style="${nameStyle}">
                 ${escapeHtml(u.username)} 
                 ${roleBadge}
             </td>
             <td>${escapeHtml(getGroupName(u.groupId))}</td>
             <td class="text-center"><div class="user-actions">${all || '<span class="text-muted">无</span>'}</div></td></tr>`;
-        }
-    }).join('')}</tbody></table></div>`) : '<p class="text-muted">暂无用户</p>';
+            }
+        }).join('')}</tbody></table></div>`) : '<p class="text-muted">暂无用户</p>';
     document.getElementById('users-list').innerHTML = html;
 }
 
@@ -1155,7 +1155,7 @@ function loadQuestions() {
       <td>${escapeHtml(getDeviceName(q.deviceType) || '-')}</td>
       <td><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
       <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
-      <td><span class="badge badge-primary">${typeMap[q.type]}</span></td>
+      <td><span class="badge ${q.type === 'single' ? 'badge-primary' : (q.type === 'multiple' ? 'badge-warning' : 'badge-success')}">${typeMap[q.type]}</span></td>
       <td style="white-space:nowrap;">${formatDateTime(q.updatedAt)}</td>
       <td>
         ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>` : ''}
@@ -1180,7 +1180,12 @@ function showQuestionEditor(type) {
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
     const majors = cachedData.categories.filter(c => c.type === 'major');
     const devices = cachedData.categories.filter(c => c.type === 'device');
-    const currentUser = Storage.getCurrentUser();
+    const editorContainer = document.getElementById('question-editor');
+    const modalBody = document.getElementById('modal-body');
+
+    // 每次显示编辑器前，先彻底清理两个潜在的容器，防止 ID 冲突
+    if (editorContainer) editorContainer.innerHTML = '';
+    if (modalBody) modalBody.innerHTML = '';
 
     const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A', groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null };
 
@@ -1192,8 +1197,10 @@ function showQuestionEditor(type) {
     if (type === 'judge') {
         const currentAnswer = (q.answer === 'true' || q.answer === true) ? 'A' : (q.answer === 'false' || q.answer === false) ? 'B' : q.answer;
         optionsHtml = `<div class="form-group"><label class="form-label">选项</label>
-      <div class="option-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:24px;font-weight:bold;">A.</span><input type="text" class="form-input" value="正确" disabled style="background:var(--bg-input);margin:0;"></div>
-      <div class="option-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:24px;font-weight:bold;">B.</span><input type="text" class="form-input" value="错误" disabled style="background:var(--bg-input);margin:0;"></div>
+      <div id="options-container" class="options-grid">
+        <div class="option-row"><span class="option-label">A.</span><input type="text" class="form-input" value="正确" disabled></div>
+        <div class="option-row"><span class="option-label">B.</span><input type="text" class="form-input" value="错误" disabled></div>
+      </div>
       </div>
       <div class="form-group"><label class="form-label">正确答案</label>
       <select class="form-select" id="q-answer">
@@ -1202,12 +1209,17 @@ function showQuestionEditor(type) {
       </select></div>`;
     } else {
         const opts = q.options || ['', '', '', ''];
-        optionsHtml = `<div class="form-group"><label class="form-label">选项</label><div id="options-container">
-      ${opts.map((o, i) => `<div class="option-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:24px;font-weight:bold;">${'ABCDEFGH'[i]}.</span>
-        <input type="text" class="form-input" value="${escapeHtml(o)}" placeholder="选项内容" style="margin:0;">
-        <button class="btn btn-sm btn-danger" onclick="removeOption(this)" ${opts.length <= 2 ? 'disabled' : ''}>删除</button>
-      </div>`).join('')}</div>
-      <div class="add-option-btn" onclick="addOption()" style="color:var(--primary);cursor:pointer;font-size:14px;font-weight:500;margin-top:8px;">+ 添加选项</div></div>
+        optionsHtml = `<div class="form-group"><label class="form-label">选项</label>
+      <div id="options-container" class="options-grid">
+        ${opts.map((o, i) => `<div class="option-row"><span class="option-label">${'ABCDEFGH'[i]}.</span>
+          <input type="text" class="form-input" value="${escapeHtml(o)}" placeholder="选项内容">
+          <button class="btn btn-sm btn-danger" onclick="removeOption(this)" ${opts.length <= 2 ? 'disabled' : ''} style="padding:4px 8px;font-size:12px;">删除</button>
+        </div>`).join('')}
+      </div>
+      <div class="add-option-btn" onclick="addOption()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        添加选项
+      </div></div>
       <div class="form-group"><label class="form-label">正确答案 ${type === 'multiple' ? '(多选用逗号分隔，如A,C)' : ''}</label>
         <input type="text" class="form-input" id="q-answer" value="${Array.isArray(q.answer) ? q.answer.join(',') : q.answer}" placeholder="${type === 'multiple' ? '如：A,C' : '如：A'}"></div>`;
     }
@@ -1218,7 +1230,7 @@ function showQuestionEditor(type) {
     `;
 
     const editorInnerHtml = `
-      <div style="display:flex;gap:16px;margin-bottom:16px;">
+      <div style="display:flex;gap:16px;margin-bottom:12px;">
         <div class="form-group" style="flex:1;margin-bottom:0;">
           <label class="form-label">专业</label>
           <select class="form-select" id="q-category" onchange="onMajorChange()">
@@ -1234,25 +1246,19 @@ function showQuestionEditor(type) {
           </select>
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">题库归属</label>
         <select class="form-select" id="q-groupId" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
             ${groupOptions}
         </select>
       </div>
-      <div class="form-group"><label class="form-label">题目</label>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">题目</label>
         <textarea class="form-input" id="q-content" rows="3" placeholder="请输入题目内容">${q.content}</textarea></div>
       ${optionsHtml}`;
 
     if (editingQuestion) {
         // 编辑模式使用弹窗
-        // 先清除页面上可能存在的内嵌编辑器，防止 ID 冲突
-        const editorContainer = document.getElementById('question-editor');
-        if (editorContainer) {
-            editorContainer.innerHTML = '';
-            editorContainer.classList.add('hidden');
-        }
-
         const footerHtml = `
           <button class="btn btn-success" onclick="saveQuestion('${type}')">保存</button>
           <button class="btn btn-secondary" onclick="closeModal()">取消</button>`;
@@ -1289,26 +1295,32 @@ function onMajorChange() {
 
 function addOption() {
     const container = document.getElementById('options-container');
+    if (!container) return;
     const count = container.children.length;
     if (count >= 8) return;
     const label = 'ABCDEFGH'[count];
-    container.insertAdjacentHTML('beforeend', `<div class="option-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-        <span style="width:24px;font-weight:bold;">${label}.</span>
-        <input type="text" class="form-input" placeholder="选项内容" style="margin:0;">
-        <button class="btn btn-sm btn-danger" onclick="removeOption(this)">删除</button>
+    container.insertAdjacentHTML('beforeend', `<div class="option-row">
+        <span class="option-label">${label}.</span>
+        <input type="text" class="form-input" placeholder="选项内容">
+        <button class="btn btn-sm btn-danger" onclick="removeOption(this)" style="padding:4px 8px;font-size:12px;">删除</button>
     </div>`);
-    updateOptionLabels();
+    updateOptionLabels(container);
 }
 
 function removeOption(btn) {
+    const container = btn.closest('#options-container');
     btn.closest('.option-row').remove();
-    updateOptionLabels();
+    updateOptionLabels(container);
 }
 
-function updateOptionLabels() {
-    document.querySelectorAll('#options-container .option-row').forEach((row, i) => {
-        row.querySelector('span').textContent = 'ABCDEFGH'[i] + '.';
-        row.querySelector('.btn-danger').disabled = document.querySelectorAll('#options-container .option-row').length <= 2;
+function updateOptionLabels(container) {
+    if (!container) container = document.getElementById('options-container');
+    if (!container) return;
+
+    const rows = container.querySelectorAll('.option-row');
+    rows.forEach((row, i) => {
+        row.querySelector('.option-label').textContent = 'ABCDEFGH'[i] + '.';
+        row.querySelector('.btn-danger').disabled = rows.length <= 2;
     });
 }
 
@@ -1336,7 +1348,10 @@ async function saveQuestion(type) {
             options = ['正确', '错误'];
             answer = answerEl.value;
         } else {
-            document.querySelectorAll('#options-container .option-row input').forEach(input => options.push(input.value.trim()));
+            const container = document.getElementById('options-container');
+            if (container) {
+                container.querySelectorAll('.option-row input').forEach(input => options.push(input.value.trim()));
+            }
 
             // 验证选项内容不为空
             if (options.some(o => !o)) {
@@ -1411,9 +1426,18 @@ async function saveQuestion(type) {
 
 function cancelQuestionEdit() {
     editingQuestion = null;
-    closeModal(); // 尝试关闭弹窗
+
+    // 徹底清除内容，防止 ID 冲突
+    const modalBody = document.getElementById('modal-body');
+    if (modalBody) modalBody.innerHTML = '';
+
+    closeModal();
+
     const editor = document.getElementById('question-editor');
-    if (editor) editor.classList.add('hidden'); // 隐藏内嵌编辑器
+    if (editor) {
+        editor.innerHTML = '';
+        editor.classList.add('hidden');
+    }
 }
 
 
@@ -3018,7 +3042,6 @@ function renderVersionInfo(displayVersion, hasUpdate, releaseData) {
     }
 }
 
-// 显示版本详情
 // 显示版本详情
 function showVersionDetails(version, releaseData, isUpdate) {
     const title = isUpdate ? '系统更新' : '版本信息';
