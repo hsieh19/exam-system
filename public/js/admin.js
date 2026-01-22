@@ -87,7 +87,6 @@ async function refreshActivePage() {
         else if (currentPage === 'questions') loadQuestions();
         else if (currentPage === 'papers') { loadPaperGroups(); loadPapers(); }
         else if (currentPage === 'logs') {
-            initLogDateFilters();
             loadSystemLogs();
         }
     } finally {
@@ -121,7 +120,6 @@ function initNavigation() {
                 else if (page === 'analysis') loadAdminAnalysisOptions();
                 else if (page === 'database') loadDbConfig();
                 else if (page === 'logs') {
-                    initLogDateFilters();
                     loadSystemLogs();
                 }
                 startAutoRefresh();
@@ -3060,13 +3058,9 @@ async function loadSystemLogs(page = 1) {
     // 获取筛选条件
     const actionFilter = document.getElementById('log-action-filter')?.value;
     const targetFilter = document.getElementById('log-target-filter')?.value;
-    const startDate = document.getElementById('log-start-date')?.value;
-    const endDate = document.getElementById('log-end-date')?.value;
 
     if (actionFilter) params.action = actionFilter;
     if (targetFilter) params.target = targetFilter;
-    if (startDate) params.startDate = startDate + 'T00:00:00.000Z';
-    if (endDate) params.endDate = endDate + 'T23:59:59.999Z';
 
     try {
         const result = await Storage.getSystemLogs(params);
@@ -3305,28 +3299,9 @@ function renderLogsPagination(result) {
     `;
 }
 
-function initLogDateFilters() {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - 2); //最近3天（含今天）
-
-    const formatDate = (date) => {
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-    };
-
-    const startEl = document.getElementById('log-start-date');
-    const endEl = document.getElementById('log-end-date');
-    if (startEl) startEl.value = formatDate(start);
-    if (endEl) endEl.value = formatDate(end);
-}
-
 function resetLogFilters() {
     document.getElementById('log-action-filter').value = '';
     document.getElementById('log-target-filter').value = '';
-    initLogDateFilters();
     loadSystemLogs(1);
 }
 

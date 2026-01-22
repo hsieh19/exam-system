@@ -1102,16 +1102,18 @@ a:hover {
   }
 
   .exam-header {
-    padding: 6px 4px;
-    margin-bottom: 12px;
+    padding: 4px 6px;
+    margin-bottom: 10px;
     border-radius: var(--radius-md);
     flex-direction: row !important;
     justify-content: space-between !important;
     align-items: center !important;
-    gap: 2px;
+    gap: 4px;
     width: 100%;
     box-sizing: border-box;
     overflow: hidden;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
   }
 
   .mobile-hide {
@@ -1119,17 +1121,19 @@ a:hover {
   }
 
   .exam-progress {
-    font-size: 11px;
+    font-size: 10px;
     white-space: nowrap;
     flex-shrink: 0;
+    color: var(--text-secondary);
   }
 
   .exam-progress strong {
-    font-size: 14px;
+    font-size: 13px;
+    color: var(--text-primary);
   }
 
   .exam-timer {
-    gap: 4px;
+    gap: 3px;
     display: flex !important;
     flex-direction: row !important;
     align-items: center;
@@ -2051,28 +2055,7 @@ a:hover {
     font-size: 14px;
   }
 
-  /* 考试界面适应 */
-  .exam-container {
-    padding: 16px;
-  }
-
-  .exam-header {
-    flex-direction: column;
-    gap: 16px;
-    padding: 16px;
-  }
-
-  .question-card {
-    padding: 20px;
-  }
-
-  .question-content {
-    font-size: 16px;
-  }
-
-  .option-item {
-    padding: 12px 16px;
-  }
+  /* 考试界面适应已在上方处理 */
 
   /* 登录页适应 */
   .login-card {
