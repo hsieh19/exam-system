@@ -33,7 +33,24 @@
 
 本项目支持 Windows 本地开发及 Linux 生产环境部署。
 
-### 💻 方式一：Linux 一键部署（推荐）
+### � 方式一：下载预编译版本（极速部署）
+
+如果你不想配置 Node.js 环境，可以直接从 [GitHub Releases](https://github.com/hsieh19/exam-system/releases) 下载对应平台的压缩包。
+
+1.  **下载压缩包**：
+    - Windows: `exam-system-windows-x64.zip`
+    - Linux: `exam-system-linux-x64.tar.gz`
+    - macOS: `exam-system-macos-x64.tar.gz`
+2.  **解压文件**：
+    - 解压后你会看到可执行文件（如 `exam-system.exe`）和 `.env.example`。
+3.  **配置环境**：
+    - 将 `.env.example` 重命名为 `.env`。
+    - 根据需要修改数据库、端口等配置。
+4.  **直接运行**：
+    - Windows: 双击 `exam-system.exe`。
+    - Linux/macOS: 执行 `./exam-system`。
+
+### � 方式二：Linux 一键脚本部署（推荐用于生产）
 
 使用 `run.sh` 脚本可以全面管理项目生命周期。
 
@@ -68,7 +85,7 @@
     *   `5. 查看日志`：实时追踪系统运行日志。
     *   `7. 初始化数据库`：首次部署时可选，重置数据库状态。
 
-### 🛠️ 方式二：本地开发 (Windows/Mac)
+### 🛠️ 方式三：源码运行（本地开发）
 
 1.  **环境要求**：Node.js v14.0+
 2.  **安装依赖**：
