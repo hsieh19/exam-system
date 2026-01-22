@@ -13,8 +13,55 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+/**
+ * 格式化日期时间为 YYYY-MM-DD HH:mm:ss
+ * @param {string|Date} dateVal 
+ * @returns {string}
+ */
+function formatFullDateTime(dateVal) {
+    if (!dateVal) return '-';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return dateVal;
+    
+    const pad = (n) => String(n).padStart(2, '0');
+    
+    const Y = d.getFullYear();
+    const M = pad(d.getMonth() + 1);
+    const D = pad(d.getDate());
+    const h = pad(d.getHours());
+    const m = pad(d.getMinutes());
+    const s = pad(d.getSeconds());
+    
+    return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+
 window.params = {};
 window.escapeHtml = escapeHtml;
+window.formatFullDateTime = formatFullDateTime;
+
+/**
+ * 格式化用时（秒）为 HH:mm:ss 或 X时Y分Z秒
+ * @param {number} seconds 
+ * @param {boolean} useChinese 是否使用中文格式
+ * @returns {string}
+ */
+function formatDuration(seconds, useChinese = false) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+
+    if (useChinese) {
+        let res = '';
+        if (h > 0) res += h + '时';
+        if (m > 0 || h > 0) res += m + '分';
+        res += s + '秒';
+        return res;
+    }
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+window.formatDuration = formatDuration;
 
 // 全局 Alert 组件
 let alertCallback = null;

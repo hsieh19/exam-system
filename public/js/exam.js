@@ -2,6 +2,7 @@
 let user, paper, allQuestions = [], currentIndex = 0, userAnswers = {};
 let questionTimer, totalSeconds = 0, totalTimerInterval;
 let paperRulesMap = {};
+let lastQuestionStartTime = null;
 
 const TYPE_NAMES = { single: '单选题', multiple: '多选题', judge: '判断题' };
 
@@ -22,10 +23,25 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         paper = examData.paper;
         allQuestions = examData.questions || [];
+        const session = examData.session;
 
         if (!paper || !allQuestions.length) {
             showAlert('试卷数据不完整或题目为空', () => window.location.href = 'student.html');
             return;
+        }
+
+        // 同步历史答案和进度
+        if (session) {
+            userAnswers = session.answers || {};
+            lastQuestionStartTime = session.lastQuestionStartTime;
+            
+            // 计算总考试时间（从首次进入开始计算）
+            const start = new Date(session.startTime);
+            const now = new Date();
+            totalSeconds = Math.floor((now.getTime() - start.getTime()) / 1000);
+            
+            // 根据已答题目数量确定当前索引
+            currentIndex = Object.keys(userAnswers).length;
         }
 
         await initExam();
@@ -57,12 +73,61 @@ async function initExam() {
     // 开始总计时
     totalTimerInterval = setInterval(() => {
         totalSeconds++;
-        const m = Math.floor(totalSeconds / 60);
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
         const s = totalSeconds % 60;
-        document.getElementById('total-timer').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+        const pad = (n) => String(n).padStart(2, '0');
+        document.getElementById('total-timer').textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
     }, 1000);
 
-    showQuestion();
+    // 自动追赶计时逻辑
+    if (lastQuestionStartTime) {
+        await catchUpQuestions();
+    } else {
+        lastQuestionStartTime = new Date().toISOString();
+        showQuestion();
+    }
+}
+
+async function catchUpQuestions() {
+    let now = new Date();
+    let startTime = new Date(lastQuestionStartTime);
+    let skipped = 0;
+    
+    while (currentIndex < allQuestions.length) {
+        const q = allQuestions[currentIndex];
+        const config = getQuestionConfig(q);
+        const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+        
+        if (elapsed >= config.time) {
+            // 这题已经超时了
+            userAnswers[q.id] = null;
+            currentIndex++;
+            skipped++;
+            // 更新 startTime 为上一题本该结束的时间，继续检查下一题
+            startTime = new Date(startTime.getTime() + config.time * 1000);
+        } else {
+            // 找到了还没超时的题目
+            lastQuestionStartTime = startTime.toISOString();
+            
+            // 如果有跳过的题目，同步到后端
+            if (skipped > 0) {
+                Storage.updateExamSession(paper.id, userAnswers, lastQuestionStartTime).catch(console.error);
+                showAlert(`检测到离开期间有 ${skipped} 道题目超时，已自动跳过`);
+            }
+            
+            showQuestion(config.time - elapsed);
+            return;
+        }
+    }
+    
+    // 如果所有题都追赶完了
+    if (currentIndex >= allQuestions.length) {
+        if (skipped > 0) {
+            await Storage.updateExamSession(paper.id, userAnswers, startTime.toISOString()).catch(console.error);
+        }
+        submitExam();
+    }
 }
 
 function getQuestionConfig(q) {
@@ -75,7 +140,7 @@ function getQuestionConfig(q) {
     };
 }
 
-function showQuestion() {
+function showQuestion(customTime = null) {
     if (currentIndex >= allQuestions.length) {
         submitExam();
         return;
@@ -109,7 +174,7 @@ function showQuestion() {
 
     document.getElementById('next-btn').textContent = currentIndex === allQuestions.length - 1 ? '提交试卷' : '下一题';
 
-    startQuestionTimer(config.time);
+    startQuestionTimer(customTime !== null ? customTime : config.time);
 }
 
 function startQuestionTimer(seconds) {
@@ -157,6 +222,14 @@ function nextQuestion(isTimeout = false) {
         userAnswers[q.id] = selected[0].dataset.value;
     }
 
+    // 切换到下一题，记录下一题的开始时间为当前时间
+    lastQuestionStartTime = new Date().toISOString();
+    
+    // 自动保存进度到后端，包括下一题的开始时间
+    Storage.updateExamSession(paper.id, userAnswers, lastQuestionStartTime).catch(err => {
+        console.error('Failed to auto-save session:', err);
+    });
+
     currentIndex++;
     showQuestion();
 }
@@ -201,7 +274,7 @@ async function submitExam() {
         answers: userAnswers
     });
 
-    showAlert(`考试完成！\n得分：${score} 分\n用时：${Math.floor(totalSeconds / 60)}分${totalSeconds % 60}秒`, () => {
+    showAlert(`考试完成！\n得分：${score} 分\n用时：${formatDuration(totalSeconds, true)}`, () => {
         sessionStorage.removeItem('current_paper_id');
         window.location.href = 'student.html';
     });

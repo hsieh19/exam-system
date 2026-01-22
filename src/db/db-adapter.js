@@ -87,7 +87,8 @@ const sqliteAdapter = {
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 role TEXT DEFAULT 'student',
-                groupId TEXT
+                groupId TEXT,
+                isFirstLogin INTEGER DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS groups (
                 id TEXT PRIMARY KEY,
@@ -151,6 +152,15 @@ const sqliteAdapter = {
                 ip TEXT,
                 createdAt TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS exam_sessions (
+                id TEXT PRIMARY KEY,
+                userId TEXT NOT NULL,
+                paperId TEXT NOT NULL,
+                startTime TEXT NOT NULL,
+                lastQuestionStartTime TEXT,
+                answers TEXT,
+                UNIQUE(userId, paperId)
+            );
             CREATE INDEX IF NOT EXISTS idx_users_groupId ON users(groupId);
             CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions(groupId);
             CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers(groupId);
@@ -176,6 +186,9 @@ const sqliteAdapter = {
 
         checkAndAddColumn('questions', 'updatedAt', 'TEXT');
         checkAndAddColumn('papers', 'published', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('papers', 'publishDate', 'TEXT');
+        checkAndAddColumn('users', 'isFirstLogin', 'INTEGER DEFAULT 1');
+        checkAndAddColumn('exam_sessions', 'lastQuestionStartTime', 'TEXT');
 
         // 确保有管理员账号
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
@@ -189,8 +202,9 @@ const sqliteAdapter = {
             // 检查如果不只有admin一个用户，应该生成新的ID，还是固定ID？
             // 原逻辑是固定 'admin-001'，为了兼容性暂时保持，但如果adminUsername变了，ID也最好保持唯一或是特定。
             // 这里我们保持 'admin-001' 作为初始超管的ID，以此标识它是系统初始化的
-            this.db.run("INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', adminUsername, hashedPwd, 'super_admin']);
+            // 默认管理员不受首次登录需更改密码的限制
+            this.db.run("INSERT INTO users (id, username, password, role, isFirstLogin) VALUES (?, ?, ?, ?, ?)",
+                ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]);
         }
 
         this.save();
@@ -280,7 +294,8 @@ const mysqlAdapter = {
                 username VARCHAR(255) UNIQUE NOT NULL,
                 password VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'student',
-                groupId VARCHAR(255)
+                groupId VARCHAR(255),
+                isFirstLogin TINYINT DEFAULT 1
             )`,
             `CREATE TABLE IF NOT EXISTS \`groups\` (
                 id VARCHAR(255) PRIMARY KEY,
@@ -344,6 +359,15 @@ const mysqlAdapter = {
                 ip VARCHAR(100),
                 createdAt VARCHAR(50) NOT NULL
             )`,
+            `CREATE TABLE IF NOT EXISTS exam_sessions (
+                id VARCHAR(255) PRIMARY KEY,
+                userId VARCHAR(255) NOT NULL,
+                paperId VARCHAR(255) NOT NULL,
+                startTime VARCHAR(50) NOT NULL,
+                lastQuestionStartTime VARCHAR(50),
+                answers TEXT,
+                UNIQUE(userId, paperId)
+            )`,
             `CREATE INDEX idx_users_groupId ON users(groupId)`,
             `CREATE INDEX idx_questions_groupId ON questions(groupId)`,
             `CREATE INDEX idx_papers_groupId ON papers(groupId)`,
@@ -362,6 +386,47 @@ const mysqlAdapter = {
             }
         }
 
+        // 数据库迁移：检查 isFirstLogin 字段是否存在
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'isFirstLogin'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding isFirstLogin column to users table');
+                await this.pool.execute("ALTER TABLE users ADD COLUMN isFirstLogin TINYINT DEFAULT 1");
+            }
+        } catch (e) {
+            console.error('MySQL migration error:', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM papers LIKE 'published'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding published column to papers table');
+                await this.pool.execute("ALTER TABLE papers ADD COLUMN published TINYINT DEFAULT 0");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (papers.published):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM papers LIKE 'publishDate'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding publishDate column to papers table');
+                await this.pool.execute("ALTER TABLE papers ADD COLUMN publishDate VARCHAR(50)");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (papers.publishDate):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM exam_sessions LIKE 'lastQuestionStartTime'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding lastQuestionStartTime column to exam_sessions table');
+                await this.pool.execute("ALTER TABLE exam_sessions ADD COLUMN lastQuestionStartTime VARCHAR(50)");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
+        }
+
         // 确保有管理员账号
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
@@ -370,9 +435,10 @@ const mysqlAdapter = {
         if (rows.length === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
+            // 默认管理员不受首次登录需更改密码的限制
             await this.pool.execute(
-                "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-                ['admin-001', adminUsername, hashedPwd, 'super_admin']
+                "INSERT INTO users (id, username, password, role, isFirstLogin) VALUES (?, ?, ?, ?, ?)",
+                ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]
             );
         }
     },
@@ -437,7 +503,8 @@ const postgresAdapter = {
                 username VARCHAR(255) UNIQUE NOT NULL,
                 password VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'student',
-                groupId VARCHAR(255)
+                groupId VARCHAR(255),
+                "isFirstLogin" INTEGER DEFAULT 1
             )`,
             `CREATE TABLE IF NOT EXISTS groups (
                 id VARCHAR(255) PRIMARY KEY,
@@ -501,6 +568,15 @@ const postgresAdapter = {
                 ip VARCHAR(100),
                 "createdAt" VARCHAR(50) NOT NULL
             )`,
+            `CREATE TABLE IF NOT EXISTS exam_sessions (
+                id VARCHAR(255) PRIMARY KEY,
+                "userId" VARCHAR(255) NOT NULL,
+                "paperId" VARCHAR(255) NOT NULL,
+                "startTime" VARCHAR(50) NOT NULL,
+                "lastQuestionStartTime" VARCHAR(50),
+                answers TEXT,
+                UNIQUE("userId", "paperId")
+            )`,
             `CREATE INDEX IF NOT EXISTS idx_users_groupId ON users("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers("groupId")`,
@@ -512,6 +588,63 @@ const postgresAdapter = {
             await this.pool.query(sql);
         }
 
+        // 数据库迁移：检查 isFirstLogin 字段是否存在
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='isFirstLogin'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding isFirstLogin column to users table');
+                await this.pool.query('ALTER TABLE users ADD COLUMN "isFirstLogin" INTEGER DEFAULT 1');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error:', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='papers' AND column_name='published'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding published column to papers table');
+                await this.pool.query('ALTER TABLE papers ADD COLUMN published INTEGER DEFAULT 0');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (papers.published):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='papers' AND column_name='publishDate'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding publishDate column to papers table');
+                await this.pool.query('ALTER TABLE papers ADD COLUMN "publishDate" VARCHAR(50)');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (papers.publishDate):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='exam_sessions' AND column_name='lastQuestionStartTime'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding lastQuestionStartTime column to exam_sessions table');
+                await this.pool.query('ALTER TABLE exam_sessions ADD COLUMN "lastQuestionStartTime" VARCHAR(50)');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
+        }
+
         // 确保有管理员账号
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
@@ -520,9 +653,10 @@ const postgresAdapter = {
         if (result.rows.length === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
+            // 默认管理员不受首次登录需更改密码的限制
             await this.pool.query(
-                "INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4)",
-                ['admin-001', adminUsername, hashedPwd, 'super_admin']
+                "INSERT INTO users (id, username, password, role, isFirstLogin) VALUES ($1, $2, $3, $4, $5)",
+                ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]
             );
         }
     },
@@ -726,6 +860,7 @@ module.exports = {
     switchDatabase,
     testConnection,
     saveDatabase,
+    verifyPassword,
     getActiveDbType: () => currentDbType,
 
     // SQLite 导入导出
@@ -763,9 +898,9 @@ module.exports = {
     addUser: async (user) => {
         const id = user.id || generateId('u_');
         const hashedPwd = await hashPassword(user.password);
-        await run("INSERT INTO users (id, username, password, role, groupId) VALUES (?, ?, ?, ?, ?)",
-            [id, user.username, hashedPwd, user.role || 'student', user.groupId || null]);
-        return { id, ...user, password: undefined };
+        await run("INSERT INTO users (id, username, password, role, groupId, isFirstLogin) VALUES (?, ?, ?, ?, ?, ?)",
+            [id, user.username, hashedPwd, user.role || 'student', user.groupId || null, user.isFirstLogin !== undefined ? user.isFirstLogin : 1]);
+        return { id, ...user, password: undefined, isFirstLogin: user.isFirstLogin !== undefined ? user.isFirstLogin : 1 };
     },
     deleteUser: async (id) => {
         await run("DELETE FROM users WHERE id = ?", [id]);
@@ -773,13 +908,20 @@ module.exports = {
     updateUser: async (user) => {
         if (user.password) {
             const hashedPwd = await hashPassword(user.password);
-            await run("UPDATE users SET username=?, password=?, role=?, groupId=? WHERE id=?",
-                [user.username, hashedPwd, user.role, user.groupId, user.id]);
+            // 如果提供了密码，默认重置 isFirstLogin 为 1，除非明确指定
+            const isFirstLogin = user.isFirstLogin !== undefined ? user.isFirstLogin : 1;
+            await run("UPDATE users SET username=?, password=?, role=?, groupId=?, isFirstLogin=? WHERE id=?",
+                [user.username, hashedPwd, user.role, user.groupId, isFirstLogin, user.id]);
         } else {
             await run("UPDATE users SET username=?, role=?, groupId=? WHERE id=?",
                 [user.username, user.role, user.groupId, user.id]);
         }
         return sanitizeUser(user);
+    },
+    changePassword: async (userId, newPassword) => {
+        const hashedPwd = await hashPassword(newPassword);
+        await run("UPDATE users SET password=?, isFirstLogin=0 WHERE id=?", [hashedPwd, userId]);
+        return true;
     },
     login: async (username, password) => {
         const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
@@ -890,16 +1032,17 @@ module.exports = {
         const id = paper.id || generateId('p_');
         await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline, groupId, creatorId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
-                paper.createDate || new Date().toISOString().split('T')[0],
+                paper.createDate || new Date().toISOString(),
                 JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
                 paper.deadline || null, paper.groupId || null, paper.creatorId || null]);
         return { id, ...paper };
     },
     updatePaper: async (paper) => {
-        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=?, groupId=?, creatorId=? WHERE id=?",
+        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=?, groupId=?, creatorId=?, published=?, publishDate=?, createDate=? WHERE id=?",
             [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
             JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
-            paper.deadline || null, paper.groupId || null, paper.creatorId || null, paper.id]);
+            paper.deadline || null, paper.groupId || null, paper.creatorId || null, 
+            paper.published ? 1 : 0, paper.publishDate || null, paper.createDate || null, paper.id]);
         return paper;
     },
     deletePaper: async (id) => {
@@ -925,29 +1068,76 @@ module.exports = {
         }));
     },
     addRecord: async (record) => {
-        const id = record.id || generateId('r_');
-        await run("INSERT INTO records (id, paperId, userId, score, totalTime, answers, submitDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [id, record.paperId, record.userId, record.score, record.totalTime,
-                JSON.stringify(record.answers || {}), new Date().toISOString()]);
-        return { id, ...record };
+        // 检查是否已存在记录，如果存在则更新（只保留最后一次成绩）
+        const existing = await query("SELECT id FROM records WHERE userId = ? AND paperId = ?", [record.userId, record.paperId]);
+        
+        const submitDate = new Date().toISOString();
+        if (existing.length > 0) {
+            const id = existing[0].id;
+            await run("UPDATE records SET score = ?, totalTime = ?, answers = ?, submitDate = ? WHERE id = ?",
+                [record.score, record.totalTime, JSON.stringify(record.answers || {}), submitDate, id]);
+            return { id, ...record, submitDate };
+        } else {
+            const id = record.id || generateId('r_');
+            await run("INSERT INTO records (id, paperId, userId, score, totalTime, answers, submitDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [id, record.paperId, record.userId, record.score, record.totalTime,
+                    JSON.stringify(record.answers || {}), submitDate]);
+            return { id, ...record, submitDate };
+        }
+    },
+    getRecordByUserAndPaper: async (userId, paperId) => {
+        const rows = await query("SELECT * FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        return rows.length > 0 ? rows[0] : null;
     },
     hasUserTakenExam: async (userId, paperId) => {
         const rows = await query("SELECT id FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
         return rows.length > 0;
     },
 
+    // ==================== 考试会话相关 ====================
+    getExamSession: async (userId, paperId) => {
+        const rows = await query("SELECT * FROM exam_sessions WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        if (rows.length === 0) return null;
+        const session = rows[0];
+        return {
+            ...session,
+            answers: session.answers ? JSON.parse(session.answers) : {}
+        };
+    },
+    createExamSession: async (session) => {
+        const id = generateId('es_');
+        const now = new Date().toISOString();
+        await run("INSERT INTO exam_sessions (id, userId, paperId, startTime, lastQuestionStartTime, answers) VALUES (?, ?, ?, ?, ?, ?)",
+            [id, session.userId, session.paperId, session.startTime || now, session.lastQuestionStartTime || now, JSON.stringify(session.answers || {})]);
+        return { id, ...session };
+    },
+    updateExamSession: async (userId, paperId, answers, lastQuestionStartTime) => {
+        if (lastQuestionStartTime) {
+            await run("UPDATE exam_sessions SET answers = ?, lastQuestionStartTime = ? WHERE userId = ? AND paperId = ?",
+                [JSON.stringify(answers || {}), lastQuestionStartTime, userId, paperId]);
+        } else {
+            await run("UPDATE exam_sessions SET answers = ? WHERE userId = ? AND paperId = ?",
+                [JSON.stringify(answers || {}), userId, paperId]);
+        }
+    },
+    deleteExamSession: async (userId, paperId) => {
+        await run("DELETE FROM exam_sessions WHERE userId = ? AND paperId = ?", [userId, paperId]);
+    },
+
     // ==================== 推送记录相关 ====================
     addPushLog: async (log) => {
         const id = log.id || generateId('pl_');
+        const pushTime = log.pushTime || new Date().toISOString();
         await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?)",
             [id, log.paperId, JSON.stringify(log.targetGroups || []), JSON.stringify(log.targetUsers || []),
-                log.deadline || null, new Date().toISOString()]);
-        return { id, ...log };
+                log.deadline || null, pushTime]);
+        return { id, ...log, pushTime };
     },
     getPushLogsByPaper: async (paperId) => {
         const rows = await query("SELECT * FROM push_logs WHERE paperId = ?", [paperId]);
         return rows.map(l => ({
             ...l,
+            pushTime: l.pushDate, // 兼容前端字段名
             targetGroups: l.targetGroups ? JSON.parse(l.targetGroups) : [],
             targetUsers: l.targetUsers ? JSON.parse(l.targetUsers) : []
         }));
@@ -1081,5 +1271,9 @@ module.exports = {
         } else {
             await run("DELETE FROM system_logs");
         }
-    }
+    },
+    
+    // 导出内部方法用于重置工具
+    _run: async (sql, params) => await run(sql, params),
+    _query: async (sql, params) => await query(sql, params)
 };

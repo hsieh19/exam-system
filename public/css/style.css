@@ -423,6 +423,16 @@ a:hover {
   background: #dc2626;
 }
 
+.btn-warning {
+  background: linear-gradient(135deg, var(--warning) 0%, #d97706 100%);
+  color: white;
+}
+
+.btn-warning:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
 .btn-sm {
   padding: 8px 16px;
   font-size: 13px;
@@ -935,11 +945,31 @@ a:hover {
   transform: translateX(4px);
 }
 
-.exam-info h3 {
+.exam-item.is-ongoing {
+  border-left: 4px solid var(--warning);
+  background: linear-gradient(to right, var(--warning-bg), var(--bg-card));
+}
+
+.exam-main-info {
+  flex: 1;
+}
+
+.exam-title-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.exam-main-info h3 {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin: 0;
+}
+
+.mobile-only-btn {
+  display: none;
 }
 
 .exam-meta {
@@ -953,6 +983,88 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.exam-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .exam-item {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .exam-item:hover {
+    transform: none;
+  }
+
+  .exam-title-group {
+    margin-bottom: 12px;
+    gap: 12px;
+  }
+
+  .exam-main-info h3 {
+    font-size: 18px;
+    flex: 1;
+  }
+
+  .mobile-only-btn {
+    display: inline-flex;
+    padding: 8px 16px;
+    font-size: 14px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .desktop-only-btn {
+    display: none;
+  }
+
+  .exam-meta {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .exam-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .countdown-timer {
+    width: 100%;
+    justify-content: center;
+    padding: 10px;
+    font-size: 15px;
+  }
+}
+
+.countdown-timer {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 14px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warning);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.countdown-timer .timer-value {
+  font-weight: 700;
+  min-width: 75px;
+  text-align: center;
+}
+
+.countdown-timer.hidden {
+  display: none;
 }
 
 /* ===========================
@@ -973,6 +1085,151 @@ a:hover {
   border-radius: var(--radius-lg);
   margin-bottom: 24px;
   border: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+    position: relative;
+  }
+
+  .exam-container {
+    padding: 8px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .exam-header {
+    padding: 6px 4px;
+    margin-bottom: 12px;
+    border-radius: var(--radius-md);
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 2px;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .mobile-hide {
+    display: none;
+  }
+
+  .exam-progress {
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .exam-progress strong {
+    font-size: 14px;
+  }
+
+  .exam-timer {
+    gap: 4px;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .timer-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg-input);
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .timer-label {
+    font-size: 9px;
+    margin-bottom: 0;
+    white-space: nowrap;
+    opacity: 0.8;
+  }
+
+  .timer-value {
+    font-size: 11px;
+    line-height: 1.2;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--primary);
+  }
+
+  .question-card {
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+    border-radius: var(--radius-md) !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .question-content {
+    font-size: 16px !important;
+    margin-bottom: 16px !important;
+    line-height: 1.5 !important;
+    word-break: break-all;
+  }
+
+  .option-item {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .option-marker {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 12px !important;
+    flex-shrink: 0;
+  }
+
+  .option-text {
+    font-size: 15px !important;
+    word-break: break-all;
+  }
+
+  .exam-container .exam-actions {
+    justify-content: stretch !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .exam-container .exam-actions .btn {
+    width: 100% !important;
+    padding: 14px !important;
+    font-size: 16px !important;
+  }
+}
+
+/* 针对超小屏幕的进一步优化 */
+@media (max-width: 360px) {
+  .exam-progress {
+    font-size: 10px;
+  }
+  .exam-progress strong {
+    font-size: 12px;
+  }
+  .timer-label {
+    font-size: 9px;
+  }
+  .timer-value {
+    font-size: 11px;
+  }
+  .timer-item {
+    padding: 2px 4px;
+    gap: 2px;
+  }
 }
 
 .exam-progress {
@@ -1429,8 +1686,51 @@ a:hover {
   display: flex;
 }
 
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
 .flex-1 {
   flex: 1;
+}
+
+.bg-body {
+  background: var(--bg-dark);
+}
+
+.p-3 {
+  padding: 12px;
+}
+
+.border-radius-sm {
+  border-radius: var(--radius-sm);
+}
+
+.border-radius-md {
+  border-radius: var(--radius-md);
+}
+
+.form-label-sm {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.form-select-sm, .form-input-sm {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  transition: var(--transition);
+  min-width: 120px;
+}
+
+.form-select-sm:focus, .form-input-sm:focus {
+  border-color: var(--primary);
 }
 
 .items-center {

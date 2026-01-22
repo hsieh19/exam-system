@@ -37,7 +37,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
                     </svg>
-                    创建试卷
+                    试卷设置
                 </div>
                 <div class="nav-item" data-page="ranking">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -212,10 +212,10 @@
                 </div>
             </div>
 
-            <!-- 创建试卷页面 -->
+            <!-- 试卷设置页面 -->
             <div id="page-papers" class="page-content hidden">
                 <div class="page-header">
-                    <h1 class="page-title">创建试卷</h1>
+                    <h1 class="page-title">试卷设置</h1>
                 </div>
 
                 <!-- 创建试卷按钮 -->
@@ -225,6 +225,7 @@
 
                 <!-- 试卷编辑器 -->
                 <div id="paper-editor" class="hidden">
+                    <h2 id="paper-editor-title" style="margin-bottom: 20px; font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">创建试卷</h2>
                     <div class="card mb-4">
                         <div class="card-header"><span class="card-title">试卷基本信息</span></div>
                         <div class="card-body">
@@ -458,20 +459,6 @@
                                 <option value="clear">清理</option>
                             </select>
                             <!-- 日期选择器移入第一行 -->
-                            <div class="logs-date-range">
-                                <input type="date" id="log-start-date" class="form-input" onchange="loadSystemLogs()">
-                                <span class="logs-date-sep">至</span>
-                                <input type="date" id="log-end-date" class="form-input" onchange="loadSystemLogs()">
-                            </div>
-                            <button class="btn btn-secondary btn-sm logs-filter-btn logs-reset-btn"
-                                onclick="resetLogFilters()" title="重置筛选">
-                                <svg class="logs-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
-                                    stroke="currentColor" stroke-width="2">
-                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                                    <path d="M3 3v5h5"></path>
-                                </svg>
-                                <span>重置</span>
-                            </button>
                             <button class="btn btn-danger btn-sm logs-filter-btn logs-clear-btn"
                                 onclick="showClearLogsModal()">
                                 <svg class="logs-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
@@ -481,7 +468,7 @@
                                         d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
                                     </path>
                                 </svg>
-                                <span>清理日志</span>
+                                <span>清空日志</span>
                             </button>
                         </div>
                     </div>

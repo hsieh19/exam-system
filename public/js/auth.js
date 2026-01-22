@@ -10,6 +10,11 @@ const Auth = {
             window.location.href = 'index.html';
             return null;
         }
+        // 如果需要修改密码且不在登录页，跳转回登录页处理
+        if (user.isFirstLogin && !window.location.pathname.endsWith('index.html')) {
+            window.location.href = 'index.html';
+            return null;
+        }
         return user;
     },
 
@@ -37,15 +42,19 @@ const Auth = {
     async login(username, password) {
         const user = await Storage.login(username, password);
         if (user) {
+            // 如果是首次登录，返回特定状态让页面处理，而不直接跳转
+            if (user.isFirstLogin) {
+                return { success: true, mustChangePassword: true };
+            }
             // 根据角色跳转
             if (user.role === 'super_admin' || user.role === 'group_admin') {
                 window.location.href = 'admin.html';
             } else {
                 window.location.href = 'student.html';
             }
-            return true;
+            return { success: true, mustChangePassword: false };
         }
-        return false;
+        return { success: false };
     },
 
     // 登出

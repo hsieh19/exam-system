@@ -3,7 +3,7 @@ const path = require('path');
 const db = require('../db/db-adapter');
 const dbConfig = require('../config/db-config');
 const { generateId } = require('../utils/id-generator');
-const { getClientIp, generateSecureToken } = require('../utils/common');
+const { getClientIp, generateSecureToken, validatePasswordStrength } = require('../utils/common');
 const { logAction } = require('../utils/logger');
 
 // Session 配置
@@ -33,6 +33,20 @@ module.exports = function initRoutes(app, context) {
 
             req.user = session.user;
             req.token = token; // 保存 token 以便续期
+
+            // 强制修改密码检查：如果需要修改密码且当前请求不是修改密码接口，则拦截
+            // 默认管理员账号不受此逻辑限制
+            const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+            if (req.user.isFirstLogin && 
+                req.user.username !== adminUsername && 
+                req.path !== '/change-password' && 
+                req.path !== '/currentUser') {
+                return res.status(403).json({ 
+                    error: '需要修改密码', 
+                    forcePasswordChange: true 
+                });
+            }
+
             next();
         } catch (err) {
             console.error('Auth Error:', err);
@@ -112,7 +126,7 @@ module.exports = function initRoutes(app, context) {
             // 清除所有会话，强制重新登录
             await sessionStore.clear();
             // 记录日志
-            await logAction('switch', 'database', dbType, req.user, { dbType }, getClientIp(req));
+            await logAction('切换数据库', 'database', dbType, req.user, { dbType }, getClientIp(req));
             res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
         } catch (e) {
             console.error('切换数据库失败:', e);
@@ -184,7 +198,7 @@ module.exports = function initRoutes(app, context) {
         const user = { id: generateId('u_'), ...userData };
         const result = await db.addUser(user);
         // 记录日志
-        await logAction('create', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
+        await logAction('创建用户', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'users' });
     });
@@ -209,7 +223,7 @@ module.exports = function initRoutes(app, context) {
 
         await db.deleteUser(req.params.id);
         // 记录日志
-        await logAction('delete', 'user', req.params.id, req.user, { username: targetUser.username }, getClientIp(req));
+        await logAction('删除用户', 'user', req.params.id, req.user, { username: targetUser.username }, getClientIp(req));
         res.json({ success: true });
         broadcast('db_change', { resource: 'users' });
     });
@@ -241,9 +255,46 @@ module.exports = function initRoutes(app, context) {
         const user = { ...updateData, id: req.params.id };
         const result = await db.updateUser(user);
         // 记录日志
-        await logAction('update', 'user', req.params.id, req.user, { username: updateData.username }, getClientIp(req));
+        await logAction('更新用户', 'user', req.params.id, req.user, { username: updateData.username }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'users' });
+    });
+
+    app.post('/api/change-password', async (req, res) => {
+        const { oldPassword, newPassword } = req.body;
+        const userId = req.user.id;
+        const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+
+        // 验证新密码强度 (默认管理员跳过强度校验)
+        if (req.user.username !== adminUsername && !validatePasswordStrength(newPassword)) {
+            return res.status(400).json({ 
+                error: '密码强度不足：必须包含大小写字母、数字和特殊字符，且长度不少于8位' 
+            });
+        }
+
+        try {
+            const user = await db.getUserByUsername(req.user.username);
+            // 验证旧密码
+            const isValid = await db.verifyPassword(oldPassword, user.password);
+            if (!isValid) {
+                return res.status(400).json({ error: '原密码错误' });
+            }
+
+            await db.changePassword(userId, newPassword);
+            
+            // 更新当前 session 中的用户信息
+            const session = await sessionStore.get(req.token);
+            if (session && session.user) {
+                session.user.isFirstLogin = 0;
+                await sessionStore.set(req.token, session.user, SESSION_EXPIRY_MS);
+            }
+
+            await logAction('修改密码', 'user', userId, req.user, {}, getClientIp(req));
+            res.json({ success: true, message: '密码修改成功' });
+        } catch (e) {
+            console.error('修改密码失败:', e);
+            res.status(500).json({ error: '修改密码失败' });
+        }
     });
 
     app.post('/api/login', async (req, res) => {
@@ -253,16 +304,13 @@ module.exports = function initRoutes(app, context) {
         if (user) {
             // 生成安全 Token
             const token = generateSecureToken();
-            // Redis Store 不需要在 value 中存 expiresAt，因为它由 TTL 控制
-            // 但为了兼容 currentUser 接口可能的逻辑，我们保留它
-            const expiresAt = Date.now() + SESSION_EXPIRY_MS;
-            await sessionStore.set(token, { ...user, expiresAt }, SESSION_EXPIRY_MS);
+            await sessionStore.set(token, user, SESSION_EXPIRY_MS);
             // 记录登录成功日志
-            await logAction('login', 'user', user.id, user, { username }, clientIp);
+            await logAction('登录成功', 'user', user.id, user, { username }, clientIp);
             res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
         } else {
             // 记录登录失败日志
-            await logAction('login_failed', 'user', null, null, { username }, clientIp);
+            await logAction('登录失败', 'user', null, null, { username }, clientIp);
             res.status(401).json({ error: '用户名或密码错误' });
         }
     });
@@ -270,9 +318,20 @@ module.exports = function initRoutes(app, context) {
     app.get('/api/currentUser', async (req, res) => {
         // 中间件已注入 req.user
         if (req.user) {
-            const latest = await db.getUserById(req.user.id);
-            if (latest) res.json(latest);
-            else res.status(401).json({ error: 'User not found' });
+            try {
+                const latest = await db.getUserById(req.user.id);
+                if (latest) {
+                    // 如果用户需要强制改密，且当前请求不是允许的白名单，则在 authMiddleware 已经拦截了
+                    // 这里返回用户信息
+                    res.json({ user: latest });
+                } else {
+                    console.error(`User not found in DB for ID: ${req.user.id}, Username: ${req.user.username}`);
+                    res.status(401).json({ error: 'User not found' });
+                }
+            } catch (err) {
+                console.error(`Error getting user ${req.user.id}:`, err);
+                res.status(500).json({ error: 'Internal Server Error' });
+            }
         } else {
             res.status(401).json({ error: 'Unauthorized' });
         }
@@ -319,7 +378,8 @@ module.exports = function initRoutes(app, context) {
         }
         const question = { id: generateId('q_'), ...questionData };
         const result = await db.addQuestion(question);
-        await logAction('create', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
+        // 记录日志
+        await logAction('创建题目', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'questions' });
     });
@@ -338,14 +398,16 @@ module.exports = function initRoutes(app, context) {
             question.groupId = req.user.groupId; // 强制保持本组
         }
         const result = await db.updateQuestion(question);
-        await logAction('update', 'question', req.params.id, req.user, { type: question.type }, getClientIp(req));
+        // 记录日志
+        await logAction('更新题目', 'question', req.params.id, req.user, { type: question.type }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'questions' });
     });
 
-    app.delete('/api/questions/all', superAdminMiddleware, async (req, res) => {
+    app.delete('/api/questions/all', adminMiddleware, async (req, res) => {
         await db.deleteAllQuestions();
-        await logAction('delete_all', 'question', null, req.user, {}, getClientIp(req));
+        // 记录日志
+        await logAction('删除所有题目', 'question', null, req.user, {}, getClientIp(req));
         res.json({ success: true });
         broadcast('db_change', { resource: 'questions' });
     });
@@ -358,8 +420,9 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权删除' });
         }
 
-        await db.deleteQuestion(req.params.id);
-        await logAction('delete', 'question', req.params.id, req.user, {}, getClientIp(req));
+    await db.deleteQuestion(req.params.id);
+        // 记录日志
+        await logAction('删除题目', 'question', req.params.id, req.user, {}, getClientIp(req));
         res.json({ success: true });
         broadcast('db_change', { resource: 'questions' });
     });
@@ -398,6 +461,36 @@ module.exports = function initRoutes(app, context) {
     });
 
     // ==================== 试卷接口 ====================
+    // 获取排行榜可选试卷列表
+    app.get('/api/papers/ranking-list', async (req, res) => {
+        try {
+            const user = req.user;
+            const papers = await db.getPapers();
+
+            if (user.role === 'super_admin') {
+                return res.json(papers);
+            }
+
+            // 对于分组管理员，返回本组创建的试卷
+            if (user.role === 'admin') {
+                return res.json(papers.filter(p => p.groupId === user.groupId));
+            }
+
+            // 对于学生，返回已发布的、且目标包含该学生或其分组的试卷
+            const visiblePapers = papers.filter(p => {
+                if (!p.published) return false;
+                const inGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+                const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
+                return inGroup || inUsers;
+            });
+
+            res.json(visiblePapers);
+        } catch (error) {
+            console.error('Error fetching ranking papers:', error);
+            res.status(500).json({ error: '获取试卷列表失败' });
+        }
+    });
+
     app.get('/api/papers', adminMiddleware, async (req, res) => {
         const filter = {};
         if (req.user.role !== 'super_admin') {
@@ -433,7 +526,8 @@ module.exports = function initRoutes(app, context) {
             paper.groupId = req.user.groupId;
         }
         const result = await db.addPaper(paper);
-        await logAction('create', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
+        // 记录日志
+        await logAction('创建试卷', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'papers' });
     });
@@ -446,11 +540,19 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权修改' });
         }
 
-        const paper = { ...req.body, id: req.params.id };
+        const paper = { 
+            ...req.body, 
+            id: req.params.id,
+            createDate: new Date().toISOString() // 编辑保存时更新创建时间
+        };
+        
         if (req.user.role !== 'super_admin') {
             paper.groupId = req.user.groupId;
         }
+        
         const result = await db.updatePaper(paper);
+        // 记录日志
+        await logAction('更新试卷', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'papers' });
     });
@@ -483,7 +585,7 @@ module.exports = function initRoutes(app, context) {
             targetGroups,
             targetUsers,
             deadline,
-            publishDate: pushTime.split('T')[0]
+            publishDate: pushTime
         };
         await db.updatePaper(paper);
 
@@ -498,7 +600,7 @@ module.exports = function initRoutes(app, context) {
         });
 
         // 记录系统日志
-        await logAction('publish', 'paper', req.params.id, req.user, { name: existing.name, targetGroups }, getClientIp(req));
+        await logAction('发布试卷', 'paper', req.params.id, req.user, { name: existing.name, targetGroups }, getClientIp(req));
 
         res.json(paper);
         broadcast('db_change', { resource: 'papers' });
@@ -524,8 +626,9 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权删除' });
         }
 
-        await db.deletePaper(req.params.id);
-        await logAction('delete', 'paper', req.params.id, req.user, { name: existing.name }, getClientIp(req));
+    await db.deletePaper(req.params.id);
+        // 记录日志
+        await logAction('删除试卷', 'paper', req.params.id, req.user, { name: existing.name }, getClientIp(req));
         res.json({ success: true });
         broadcast('db_change', { resource: 'papers' });
     });
@@ -550,8 +653,25 @@ module.exports = function initRoutes(app, context) {
                 if (deadline < now) return null;
             }
 
-            if (await db.hasUserTakenExam(user.id, p.id)) return null;
-            return p;
+            // 检查用户是否已参加过考试
+            const record = await db.getRecordByUserAndPaper(user.id, p.id);
+            if (record) {
+                // 如果已提交过，检查最后提交时间是否早于最新发布时间
+                // 如果是，说明是重新推送的，应该允许再次考试
+                if (p.publishDate && record.submitDate) {
+                    const submitDate = new Date(record.submitDate);
+                    const publishDate = new Date(p.publishDate);
+                    // 如果最后提交时间晚于发布时间，说明已经考过了最新推送的版本
+                    if (submitDate >= publishDate) return null;
+                } else {
+                    // 如果没有发布时间（旧数据）且有记录，则按原逻辑隐藏
+                    return null;
+                }
+            }
+
+            // 检查是否有进行中的会话
+            const session = await db.getExamSession(user.id, p.id);
+            return { ...p, isOngoing: !!session };
         });
 
         const results = await Promise.all(availablePromises);
@@ -575,7 +695,10 @@ module.exports = function initRoutes(app, context) {
     app.post('/api/records', async (req, res) => {
         // 确保用户只能为自己提交记录
         const record = { id: generateId('r_'), ...req.body, userId: req.user.id };
-        res.json(await db.addRecord(record));
+        const result = await db.addRecord(record);
+        // 考试提交成功后，删除进度会话
+        await db.deleteExamSession(req.user.id, record.paperId);
+        res.json(result);
     });
 
     app.get('/api/ranking/:paperId', async (req, res) => {
@@ -648,8 +771,30 @@ module.exports = function initRoutes(app, context) {
             }
 
             // 是否已参加
-            if (await db.hasUserTakenExam(user.id, paper.id)) {
-                return res.status(400).json({ error: '您已参加过该考试' });
+            const record = await db.getRecordByUserAndPaper(user.id, paper.id);
+            if (record) {
+                // 如果已提交过，检查最后提交时间是否早于最新发布时间
+                if (paper.publishDate && record.submitDate) {
+                    const submitDate = new Date(record.submitDate);
+                    const publishDate = new Date(paper.publishDate);
+                    // 如果最后提交时间晚于发布时间，说明已经考过了最新推送的版本
+                    if (submitDate >= publishDate) {
+                        return res.status(400).json({ error: '您已参加过该考试' });
+                    }
+                } else {
+                    return res.status(400).json({ error: '您已参加过该考试' });
+                }
+            }
+
+            // 检查或创建会话
+            let session = await db.getExamSession(user.id, paper.id);
+            if (!session) {
+                session = await db.createExamSession({
+                    userId: user.id,
+                    paperId: paper.id,
+                    startTime: new Date().toISOString(),
+                    answers: {}
+                });
             }
 
             // 组装试题列表（只返回当前试卷包含的题目）
@@ -677,11 +822,30 @@ module.exports = function initRoutes(app, context) {
                     questions: paper.questions || {},
                     deadline: paper.deadline || null
                 },
-                questions: selectedQuestions
+                questions: selectedQuestions,
+                session: {
+                    startTime: session.startTime,
+                    lastQuestionStartTime: session.lastQuestionStartTime,
+                    answers: session.answers
+                }
             });
         } catch (e) {
             console.error('获取考试数据失败:', e);
             res.status(500).json({ error: '获取考试数据失败' });
+        }
+    });
+
+    app.put('/api/exam/:paperId/session', async (req, res) => {
+        try {
+            const paperId = req.params.paperId;
+            const userId = req.user.id;
+            const { answers, lastQuestionStartTime } = req.body;
+
+            await db.updateExamSession(userId, paperId, answers, lastQuestionStartTime);
+            res.json({ success: true });
+        } catch (e) {
+            console.error('更新考试进度失败:', e);
+            res.status(500).json({ error: '更新考试进度失败' });
         }
     });
 
@@ -718,12 +882,12 @@ module.exports = function initRoutes(app, context) {
 
     app.delete('/api/logs', superAdminMiddleware, async (req, res) => {
         try {
-            const { beforeDate } = req.body;
-            await db.clearSystemLogs(beforeDate);
-            await logAction('clear', 'logs', null, req.user, { beforeDate }, getClientIp(req));
+            await db.clearSystemLogs(null);
+            // 记录日志
+            await logAction('清空日志', 'logs', null, req.user, { all: true }, getClientIp(req));
             res.json({ success: true });
         } catch (e) {
-            console.error('清理日志失败:', e);
+            console.error('清空日志失败:', e);
             res.status(500).json({ error: '服务内部错误' });
         }
     });

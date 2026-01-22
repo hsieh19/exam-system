@@ -885,6 +885,12 @@ let currentTypeFilter = 'all';  // 'all' | 'single' | 'multiple' | 'judge'
 let currentMajorFilter = 'all'; // 'all' | majorId
 let currentDeviceFilter = 'all'; // 'all' | deviceId
 
+// 手动选题器的筛选状态
+let selectorGroupFilter = 'all';
+let selectorMajorFilter = 'all';
+let selectorDeviceFilter = 'all';
+let selectorKeywordFilter = '';
+
 // 通用下拉菜单控制
 function toggleFilterDropdown(filterType) {
     // 设备筛选：如果专业是全部，则不允许打开
@@ -1064,6 +1070,130 @@ function updateDeviceFilterButton() {
     }
 }
 
+// ========== 选题器下拉菜单控制 ==========
+function toggleSelectorFilterDropdown(filterType) {
+    if (filterType === 'device' && selectorMajorFilter === 'all') return;
+
+    // 关闭所有选题器下拉菜单
+    ['group', 'major', 'device'].forEach(type => {
+        if (type !== filterType) {
+            const menu = document.getElementById(`selector-${type}-filter-menu`);
+            if (menu) menu.style.display = 'none';
+        }
+    });
+
+    const menu = document.getElementById(`selector-${filterType}-filter-menu`);
+    if (!menu) return;
+
+    if (menu.style.display === 'none') {
+        if (filterType === 'group') initSelectorGroupFilterDropdown();
+        else if (filterType === 'major') initSelectorMajorFilterDropdown();
+        else if (filterType === 'device') initSelectorDeviceFilterDropdown();
+
+        menu.style.display = 'block';
+        setTimeout(() => {
+            document.addEventListener('click', (e) => closeSelectorFilterDropdown(e, filterType), { once: true });
+        }, 0);
+    } else {
+        menu.style.display = 'none';
+    }
+}
+
+function closeSelectorFilterDropdown(e, filterType) {
+    const dropdown = document.getElementById(`selector-${filterType}-filter-dropdown`);
+    const menu = document.getElementById(`selector-${filterType}-filter-menu`);
+    if (dropdown && menu && !dropdown.contains(e.target)) {
+        menu.style.display = 'none';
+    }
+}
+
+function initSelectorGroupFilterDropdown() {
+    const currentUser = Storage.getCurrentUser();
+    const menu = document.getElementById('selector-group-filter-menu');
+    if (!menu) return;
+
+    let options = [{ id: 'all', name: '全部题库' }, { id: 'public', name: '公共题库' }];
+    if (currentUser.role === 'super_admin') {
+        cachedData.groups.forEach(g => options.push({ id: g.id, name: g.name }));
+    } else {
+        const myGroup = cachedData.groups.find(g => g.id === currentUser.groupId);
+        if (myGroup) options.push({ id: myGroup.id, name: myGroup.name });
+    }
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorGroupFilter === opt.id ? 'active' : ''}" 
+             onclick="selectSelectorFilter('group', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+}
+
+function initSelectorMajorFilterDropdown() {
+    const menu = document.getElementById('selector-major-filter-menu');
+    if (!menu) return;
+
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+    const options = [{ id: 'all', name: '全部专业' }, ...majors.map(m => ({ id: m.id, name: m.name }))];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorMajorFilter === opt.id ? 'active' : ''}" 
+             onclick="selectSelectorFilter('major', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+}
+
+function initSelectorDeviceFilterDropdown() {
+    const menu = document.getElementById('selector-device-filter-menu');
+    if (!menu || selectorMajorFilter === 'all') return;
+
+    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === selectorMajorFilter);
+    const options = [{ id: 'all', name: '全部设备' }, ...devices.map(d => ({ id: d.id, name: d.name }))];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorDeviceFilter === opt.id ? 'active' : ''}" 
+             onclick="selectSelectorFilter('device', '${opt.id}', '${escapeHtml(opt.name)}')"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+}
+
+function selectSelectorFilter(filterType, value, name) {
+    if (filterType === 'group') selectorGroupFilter = value;
+    else if (filterType === 'major') {
+        selectorMajorFilter = value;
+        selectorDeviceFilter = 'all';
+        updateSelectorDeviceFilterButton();
+    }
+    else if (filterType === 'device') selectorDeviceFilter = value;
+
+    document.getElementById(`selector-${filterType}-filter-label`).textContent = name;
+    document.getElementById(`selector-${filterType}-filter-menu`).style.display = 'none';
+    applyQuestionFilters();
+}
+
+function updateSelectorDeviceFilterButton() {
+    const btn = document.getElementById('btn-selector-device-filter');
+    const label = document.getElementById('selector-device-filter-label');
+    if (!btn || !label) return;
+
+    if (selectorMajorFilter === 'all') {
+        btn.disabled = true;
+        btn.classList.replace('btn-primary', 'btn-secondary');
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        label.textContent = '全部设备';
+    } else {
+        btn.disabled = false;
+        btn.classList.replace('btn-secondary', 'btn-primary');
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    }
+}
+
 // 设备类型筛选
 function initDeviceFilterDropdown() {
     const menu = document.getElementById('device-filter-menu');
@@ -1137,13 +1267,6 @@ function loadQuestions() {
     const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
     const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
 
-    // 格式化时间显示
-    const formatDateTime = (isoStr) => {
-        if (!isoStr) return '-';
-        const d = new Date(isoStr);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    };
-
     const html = questions.length ? `<div class="table-container"><table class="data-table">
     <thead><tr><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>最后修改</th><th>操作</th></tr></thead>
     <tbody>${questions.map(q => {
@@ -1156,7 +1279,7 @@ function loadQuestions() {
       <td><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
       <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
       <td><span class="badge ${q.type === 'single' ? 'badge-primary' : (q.type === 'multiple' ? 'badge-warning' : 'badge-success')}">${typeMap[q.type]}</span></td>
-      <td style="white-space:nowrap;">${formatDateTime(q.updatedAt)}</td>
+      <td style="white-space:nowrap;">${formatFullDateTime(q.updatedAt)}</td>
       <td>
         ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>` : ''}
         ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteQuestion('${q.id}')">删除</button>` : ''}
@@ -1446,6 +1569,7 @@ function cancelQuestionEdit() {
 let paperRules = [];
 let rulesValidated = false;
 let selectedQuestions = {};
+let currentEditingPaperId = null;
 
 function loadPaperGroups() { }
 
@@ -1454,18 +1578,19 @@ function loadPapers() {
     const currentUser = Storage.getCurrentUser();
     const getGroupName = (id) => cachedData.groups.find(g => g.id === id)?.name || '公共/全员';
 
-    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>归属分组</th><th>创建日期</th><th>状态</th><th>操作</th></tr></thead>
+    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>归属分组</th><th style="width:180px;">创建日期</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>${papers.map(p => {
         const canManage = currentUser.role === 'super_admin' || p.groupId === currentUser.groupId;
         return `<tr>
       <td>${escapeHtml(p.name)}</td>
       <td>${escapeHtml(getGroupName(p.groupId))}</td>
-      <td>${p.createDate || '-'}</td>
+      <td style="white-space:nowrap;">${formatFullDateTime(p.createDate)}</td>
       <td><span class="badge ${p.published ? 'badge-success' : 'badge-warning'}">${p.published ? '已发布' : '草稿'}</span></td>
       <td>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-secondary" onclick="showPushLogs('${p.id}')">推送记录</button>
             ${canManage ? `
+                <button class="btn btn-sm btn-info" onclick="editPaper('${p.id}')">编辑</button>
                 <button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>
                 <button class="btn btn-sm btn-danger" onclick="deletePaper('${p.id}')">删除</button>
             ` : ''}
@@ -1488,11 +1613,6 @@ async function showPushLogs(paperId) {
         return;
     }
 
-    const formatTime = (isoStr) => {
-        const d = new Date(isoStr);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    };
-
     const getGroupNames = (ids) => ids.map(id => groups.find(g => g.id === id)?.name || id).join('、') || '-';
     const getUserNames = (ids) => ids.map(id => users.find(u => u.id === id)?.username || id).join('、') || '-';
 
@@ -1501,19 +1621,19 @@ async function showPushLogs(paperId) {
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>推送时间</th>
+                        <th style="width:180px;">推送时间</th>
                         <th>目标分组</th>
                         <th>目标用户</th>
-                        <th>截止时间</th>
+                        <th style="width:180px;">截止时间</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${logs.map(log => `
                         <tr>
-                            <td>${formatTime(log.pushTime)}</td>
+                            <td style="white-space:nowrap;">${formatFullDateTime(log.pushTime)}</td>
                             <td>${getGroupNames(log.targetGroups)}</td>
                             <td>${getUserNames(log.targetUsers)}</td>
-                            <td>${log.deadline || '-'}</td>
+                            <td style="white-space:nowrap;">${formatFullDateTime(log.deadline)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -1527,8 +1647,10 @@ async function showPushLogs(paperId) {
 
 
 function showPaperEditor() {
+    currentEditingPaperId = null; // 重置编辑 ID
     document.getElementById('btn-create-paper').classList.add('hidden');
     document.getElementById('paper-editor').classList.remove('hidden');
+    document.getElementById('paper-editor-title').textContent = '创建试卷';
     document.getElementById('paper-name').value = '';
     paperRules = [];
     rulesValidated = false;
@@ -1538,11 +1660,41 @@ function showPaperEditor() {
     document.getElementById('manual-select-area').classList.add('hidden');
 }
 
+function editPaper(paperId) {
+    const paper = cachedData.papers.find(p => p.id === paperId);
+    if (!paper) return;
+
+    currentEditingPaperId = paperId;
+    document.getElementById('btn-create-paper').classList.add('hidden');
+    document.getElementById('paper-editor').classList.remove('hidden');
+    document.getElementById('paper-editor-title').textContent = '编辑试卷';
+    document.getElementById('paper-name').value = paper.name;
+    
+    // 回填规则
+    paperRules = JSON.parse(JSON.stringify(paper.rules || []));
+    
+    // 回填已选题目
+    selectedQuestions = JSON.parse(JSON.stringify(paper.questions || {}));
+    
+    updateRulesTable();
+    rulesValidated = true; // 编辑模式下默认已校验
+    enableGenerateButtons();
+    document.getElementById('manual-select-area').classList.add('hidden');
+    
+    // 滚动到编辑器
+    document.getElementById('paper-editor').scrollIntoView({ behavior: 'smooth' });
+}
+
 function cancelPaperEdit() {
     document.getElementById('btn-create-paper').classList.remove('hidden');
     document.getElementById('paper-editor').classList.add('hidden');
+    document.getElementById('paper-editor-title').textContent = '创建试卷';
+    document.getElementById('paper-name').value = '';
     paperRules = [];
+    selectedQuestions = {};
     rulesValidated = false;
+    currentEditingPaperId = null;
+    disableGenerateButtons();
 }
 
 function addRuleRow() {
@@ -1688,14 +1840,14 @@ function validateRules() {
 function showManualSelect() {
     if (!rulesValidated) { showAlert('请先校验试卷规则'); return; }
 
-    selectedQuestions = {};
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
 
     let html = '<div class="flex gap-3 mb-4">';
     paperRules.forEach(rule => {
-        selectedQuestions[rule.type] = [];
+        if (!selectedQuestions[rule.type]) selectedQuestions[rule.type] = [];
+        const currentCount = selectedQuestions[rule.type].length;
         html += `<button class="btn btn-secondary" onclick="showQuestionSelector('${rule.type}', ${rule.count})">
-            ${typeNames[rule.type]} (已选 <span id="selected-count-${rule.type}">0</span>/${rule.count})
+            ${typeNames[rule.type]} (已选 <span id="selected-count-${rule.type}">${currentCount}</span>/${rule.count})
         </button>`;
     });
     html += '</div>';
@@ -1705,23 +1857,148 @@ function showManualSelect() {
     document.getElementById('manual-select-area').classList.remove('hidden');
 }
 
-function showQuestionSelector(type, maxCount) {
-    const questions = cachedData.questions.filter(q => q.type === type);
-    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
-    const selected = selectedQuestions[type] || [];
+let currentSelectorType = null;
+let currentSelectorMaxCount = 0;
 
-    let html = `<h4 class="mb-4">选择${typeNames[type]} (最多${maxCount}题)</h4>
-    <div class="table-container"><table class="data-table">
-    <thead><tr><th style="width:50px;">选择</th><th>专业</th><th>题目</th></tr></thead>
-    <tbody>${questions.map(q => `
-        <tr>
-            <td><input type="checkbox" ${selected.includes(q.id) ? 'checked' : ''} 
-                onchange="toggleQuestion('${type}', '${q.id}', ${maxCount}, this.checked)"></td>
-            <td>${q.category || '-'}</td>
-            <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${q.content}</td>
-        </tr>`).join('')}</tbody></table></div>`;
+function showQuestionSelector(type, maxCount) {
+    currentSelectorType = type;
+    currentSelectorMaxCount = maxCount;
+    
+    // 重置选题器的筛选状态
+    selectorGroupFilter = 'all';
+    selectorMajorFilter = 'all';
+    selectorDeviceFilter = 'all';
+    selectorKeywordFilter = '';
+
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+    
+    let html = `<div class="selector-header mb-4">
+        <h4 class="mb-3">选择${typeNames[type]} (最多${maxCount}题)</h4>
+        <div class="filter-bar flex gap-3 flex-wrap bg-body p-3 border-radius-md" style="align-items: flex-end;">
+            <div class="filter-item">
+                <label class="form-label-sm">题库/分组</label>
+                <div class="dropdown-filter" id="selector-group-filter-dropdown" style="position:relative;">
+                    <button class="btn btn-sm btn-primary" id="btn-selector-group-filter"
+                        onclick="toggleSelectorFilterDropdown('group')"
+                        style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                        <span id="selector-group-filter-label">全部题库</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="selector-group-filter-menu"
+                        style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
+                    </div>
+                </div>
+            </div>
+            <div class="filter-item">
+                <label class="form-label-sm">专业</label>
+                <div class="dropdown-filter" id="selector-major-filter-dropdown" style="position:relative;">
+                    <button class="btn btn-sm btn-primary" id="btn-selector-major-filter"
+                        onclick="toggleSelectorFilterDropdown('major')"
+                        style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                        <span id="selector-major-filter-label">全部专业</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="selector-major-filter-menu"
+                        style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
+                    </div>
+                </div>
+            </div>
+            <div class="filter-item">
+                <label class="form-label-sm">设备类型</label>
+                <div class="dropdown-filter" id="selector-device-filter-dropdown" style="position:relative;">
+                    <button class="btn btn-sm btn-secondary" id="btn-selector-device-filter"
+                        onclick="toggleSelectorFilterDropdown('device')" disabled
+                        style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;opacity:0.5;cursor:not-allowed;">
+                        <span id="selector-device-filter-label">全部设备</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="selector-device-filter-menu"
+                        style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
+                    </div>
+                </div>
+            </div>
+            <div class="filter-item">
+                <label class="form-label-sm">关键词</label>
+                <input type="text" class="form-input-sm" id="selector-filter-keyword" 
+                    placeholder="搜索题目内容..." 
+                    style="height:32px;padding:4px 12px;"
+                    onkeyup="selectorKeywordFilter = this.value; applyQuestionFilters()">
+            </div>
+        </div>
+    </div>
+    <div id="selector-table-container">
+        ${renderQuestionSelectorTable(type, maxCount)}
+    </div>`;
 
     document.getElementById('question-selector-area').innerHTML = html;
+}
+
+function applyQuestionFilters() {
+    const type = currentSelectorType;
+    const maxCount = currentSelectorMaxCount;
+    const container = document.getElementById('selector-table-container');
+    if (container) {
+        container.innerHTML = renderQuestionSelectorTable(type, maxCount);
+    }
+}
+
+function renderQuestionSelectorTable(type, maxCount) {
+    let questions = cachedData.questions.filter(q => q.type === type);
+
+    if (selectorGroupFilter !== 'all') {
+        if (selectorGroupFilter === 'public') {
+            questions = questions.filter(q => !q.groupId);
+        } else {
+            questions = questions.filter(q => q.groupId === selectorGroupFilter);
+        }
+    }
+
+    if (selectorMajorFilter !== 'all') {
+        questions = questions.filter(q => q.category === selectorMajorFilter);
+    }
+
+    if (selectorDeviceFilter !== 'all') {
+        questions = questions.filter(q => q.deviceType === selectorDeviceFilter);
+    }
+
+    if (selectorKeywordFilter) {
+        const keyword = selectorKeywordFilter.toLowerCase();
+        questions = questions.filter(q => q.content.toLowerCase().includes(keyword));
+    }
+
+    const selected = selectedQuestions[type] || [];
+    const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
+    const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
+    const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
+
+    return `<div class="table-container"><table class="data-table">
+    <thead><tr>
+        <th style="width:60px;white-space:nowrap;text-align:center;">选择</th>
+        <th style="width:120px;">专业/设备</th>
+        <th style="width:100px;white-space:nowrap;">题库归属</th>
+        <th>题目</th>
+        <th style="width:80px;white-space:nowrap;text-align:center;">操作</th>
+    </tr></thead>
+    <tbody>${questions.length ? questions.map(q => `
+        <tr>
+            <td style="text-align:center;white-space:nowrap;"><input type="checkbox" ${selected.includes(q.id) ? 'checked' : ''} 
+                onchange="toggleQuestion('${type}', '${q.id}', ${maxCount}, this.checked)"></td>
+            <td style="font-size:12px;color:var(--text-secondary);">
+                <div>${escapeHtml(getMajorName(q.category))}</div>
+                <div style="opacity:0.7;">${escapeHtml(getDeviceName(q.deviceType) || '-')}</div>
+            </td>
+            <td style="white-space:nowrap;"><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
+            <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(q.content)}">${escapeHtml(q.content)}</td>
+            <td style="text-align:center;white-space:nowrap;">
+                <button class="btn btn-sm btn-secondary" onclick="viewQuestionDetail('${q.id}')">查看</button>
+            </td>
+        </tr>`).join('') : '<tr><td colspan="5" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
 }
 
 function toggleQuestion(type, questionId, maxCount, checked) {
@@ -1739,6 +2016,82 @@ function toggleQuestion(type, questionId, maxCount, checked) {
     }
 
     document.getElementById(`selected-count-${type}`).textContent = selectedQuestions[type].length;
+}
+
+function viewQuestionDetail(id) {
+    const q = cachedData.questions.find(item => item.id === id);
+    if (!q) return;
+
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+    const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
+    const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '-';
+    const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
+
+    let optionsHtml = '';
+    if (q.type === 'judge') {
+        const currentAnswer = (q.answer === 'true' || q.answer === true) ? 'A' : (q.answer === 'false' || q.answer === false) ? 'B' : q.answer;
+        optionsHtml = `
+            <div class="form-group"><label class="form-label">选项</label>
+                <div class="options-grid">
+                    <div class="option-row"><span class="option-label">A.</span><input type="text" class="form-input" value="正确" disabled></div>
+                    <div class="option-row"><span class="option-label">B.</span><input type="text" class="form-input" value="错误" disabled></div>
+                </div>
+            </div>
+            <div class="form-group"><label class="form-label">正确答案</label>
+                <div class="p-2 bg-body border-radius-sm" style="font-weight:600;color:var(--primary);">${currentAnswer}</div>
+            </div>`;
+    } else {
+        const opts = q.options || [];
+        optionsHtml = `
+            <div class="form-group"><label class="form-label">选项</label>
+                <div class="options-grid">
+                    ${opts.map((o, i) => `
+                        <div class="option-row">
+                            <span class="option-label">${'ABCDEFGH'[i]}.</span>
+                            <div class="form-input bg-body" style="min-height:38px;height:auto;padding:8px 12px;opacity:0.8;">${escapeHtml(o)}</div>
+                        </div>`).join('')}
+                </div>
+            </div>
+            <div class="form-group"><label class="form-label">正确答案</label>
+                <div class="p-2 bg-body border-radius-sm" style="font-weight:600;color:var(--primary);">${Array.isArray(q.answer) ? q.answer.join(',') : q.answer}</div>
+            </div>`;
+    }
+
+    const html = `
+        <div class="view-question-detail" style="max-height: 70vh; overflow-y: auto; padding-right: 8px;">
+            <div style="display:flex;gap:16px;margin-bottom:12px;">
+                <div class="form-group" style="flex:1;margin-bottom:0;">
+                    <label class="form-label">专业</label>
+                    <div class="p-2 bg-body border-radius-sm">${escapeHtml(getMajorName(q.category))}</div>
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:0;">
+                    <label class="form-label">设备类型</label>
+                    <div class="p-2 bg-body border-radius-sm">${escapeHtml(getDeviceName(q.deviceType))}</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:16px;margin-bottom:12px;">
+                <div class="form-group" style="flex:1;margin-bottom:0;">
+                    <label class="form-label">题库归属</label>
+                    <div class="p-2 bg-body border-radius-sm">${escapeHtml(getGroupName(q.groupId))}</div>
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:0;">
+                    <label class="form-label">题型</label>
+                    <div class="p-2 bg-body border-radius-sm">${typeNames[q.type]}</div>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:12px;">
+                <label class="form-label">题目内容</label>
+                <div class="p-3 bg-body border-radius-sm" style="white-space:pre-wrap;line-height:1.6;">${escapeHtml(q.content)}</div>
+            </div>
+            ${optionsHtml}
+            <div class="form-group" style="margin-bottom:0;opacity:0.6;font-size:12px;">
+                <label class="form-label">最后修改</label>
+                <div>${formatFullDateTime(q.updatedAt)}</div>
+            </div>
+        </div>
+    `;
+
+    openModal('查看题目详情', html, '<button class="btn btn-primary" onclick="closeModal()">确定</button>');
 }
 
 async function generatePaperFromSelection() {
@@ -1760,8 +2113,13 @@ async function generatePaperFromSelection() {
         published: false
     };
 
-    await Storage.addPaper(paper);
-    showAlert('试卷创建成功！');
+    if (currentEditingPaperId) {
+        await Storage.updatePaper({ ...paper, id: currentEditingPaperId });
+        showAlert('试卷更新成功！');
+    } else {
+        await Storage.addPaper(paper);
+        showAlert('试卷创建成功！');
+    }
     cancelPaperEdit();
     await refreshCache();
     loadPapers();
@@ -1787,8 +2145,13 @@ async function autoGeneratePaper() {
         published: false
     };
 
-    await Storage.addPaper(paper);
-    showAlert('试卷自动生成成功！');
+    if (currentEditingPaperId) {
+        await Storage.updatePaper({ ...paper, id: currentEditingPaperId });
+        showAlert('试卷更新成功！');
+    } else {
+        await Storage.addPaper(paper);
+        showAlert('试卷自动生成成功！');
+    }
     cancelPaperEdit();
     await refreshCache();
     loadPapers();
@@ -1940,10 +2303,9 @@ async function loadAdminRanking(paperId) {
         return;
     }
 
-    const formatTime = (s) => `${Math.floor(s / 60)}分${s % 60}秒`;
-    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>用时</th></tr></thead>
+    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>用时</th><th style="width:180px;">交卷时间</th></tr></thead>
     <tbody>${ranking.map(r => `<tr><td>${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `${r.rank}/${totalAssigned}`}</td>
-      <td>${r.username}</td><td><strong>${r.score}</strong></td><td>${formatTime(r.totalTime)}</td></tr>`).join('')}</tbody></table>`;
+      <td>${r.username}</td><td><strong>${r.score}</strong></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 
@@ -2199,8 +2561,6 @@ async function loadAdminAnalysis(paperId) {
     const fastestTime = Math.min(...times);
     const slowestTime = Math.max(...times);
 
-    const formatTime = (s) => `${Math.floor(s / 60)}分${s % 60}秒`;
-
     const html = `
     <div class="analysis-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:20px;">
         <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
@@ -2229,11 +2589,11 @@ async function loadAdminAnalysis(paperId) {
         </div>
         <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最快答题时间</div>
-            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatTime(fastestTime)}</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(fastestTime, true)}</div>
         </div>
         <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最慢答题时间</div>
-            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatTime(slowestTime)}</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(slowestTime, true)}</div>
         </div>
     </div>`;
 
@@ -2614,45 +2974,45 @@ const LOG_PAGE_SIZE = 20;
 const LOG_TARGET_ACTIONS = {
     '': [ // 全部对象
         { value: '', label: '全部操作' },
-        { value: 'login', label: '登录' },
-        { value: 'login_failed', label: '登录失败' },
-        { value: 'create', label: '创建' },
-        { value: 'update', label: '更新' },
-        { value: 'delete', label: '删除' },
-        { value: 'delete_all', label: '批量删除' },
-        { value: 'publish', label: '发布' },
-        { value: 'switch', label: '切换' },
-        { value: 'clear', label: '清理' }
+        { value: '登录成功', label: '登录' },
+        { value: '登录失败', label: '登录失败' },
+        { value: '创建', label: '创建' },
+        { value: '更新', label: '更新' },
+        { value: '删除', label: '删除' },
+        { value: '发布', label: '发布' },
+        { value: '切换', label: '切换' },
+        { value: '清空', label: '清空' }
     ],
     'user': [
         { value: '', label: '全部操作' },
-        { value: 'login', label: '登录' },
-        { value: 'login_failed', label: '登录失败' },
-        { value: 'create', label: '创建用户' },
-        { value: 'update', label: '更新用户' },
-        { value: 'delete', label: '删除用户' }
+        { value: '登录成功', label: '登录' },
+        { value: '登录失败', label: '登录失败' },
+        { value: '创建用户', label: '创建用户' },
+        { value: '更新用户', label: '更新用户' },
+        { value: '删除用户', label: '删除用户' },
+        { value: '修改密码', label: '修改密码' }
     ],
     'question': [
         { value: '', label: '全部操作' },
-        { value: 'create', label: '创建题目' },
-        { value: 'update', label: '更新题目' },
-        { value: 'delete', label: '删除题目' },
-        { value: 'delete_all', label: '清空题库' }
+        { value: '创建题目', label: '创建题目' },
+        { value: '更新题目', label: '更新题目' },
+        { value: '删除题目', label: '删除题目' },
+        { value: '删除所有题目', label: '清空题库' }
     ],
     'paper': [
         { value: '', label: '全部操作' },
-        { value: 'create', label: '创建试卷' },
-        { value: 'update', label: '更新试卷' },
-        { value: 'publish', label: '发布试卷' },
-        { value: 'delete', label: '删除试卷' }
+        { value: '创建试卷', label: '创建试卷' },
+        { value: '更新试卷', label: '更新试卷' },
+        { value: '发布试卷', label: '发布试卷' },
+        { value: '删除试卷', label: '删除试卷' }
     ],
     'database': [
         { value: '', label: '全部操作' },
-        { value: 'switch', label: '切换数据库' }
+        { value: '切换数据库', label: '切换数据库' }
     ],
     'logs': [
         { value: '', label: '全部操作' },
-        { value: 'clear', label: '清理日志' }
+        { value: '清空日志', label: '清空日志' }
     ]
 };
 
@@ -2728,14 +3088,37 @@ function renderSystemLogs(logs) {
 
     const actionLabels = {
         'login': '登录',
+        '登录成功': '登录',
         'login_failed': '登录失败',
+        '登录失败': '登录失败',
         'create': '创建',
+        '创建': '创建',
         'update': '更新',
+        '更新': '更新',
         'delete': '删除',
+        '删除': '删除',
         'delete_all': '批量删除',
+        '批量删除': '批量删除',
         'publish': '发布',
+        '发布': '发布',
         'switch': '切换',
-        'clear': '清理'
+        '切换': '切换',
+        'clear': '清空',
+        '清空': '清空',
+        '创建用户': '创建用户',
+        '更新用户': '更新用户',
+        '删除用户': '删除用户',
+        '修改密码': '修改密码',
+        '创建题目': '创建题目',
+        '更新题目': '更新题目',
+        '删除题目': '删除题目',
+        '删除所有题目': '清空题库',
+        '创建试卷': '创建试卷',
+        '更新试卷': '更新试卷',
+        '发布试卷': '发布试卷',
+        '删除试卷': '删除试卷',
+        '切换数据库': '切换数据库',
+        '清空日志': '清空日志'
     };
 
     const targetLabels = {
@@ -2748,21 +3131,53 @@ function renderSystemLogs(logs) {
 
     const actionStyles = {
         'login': 'background:#10b981;color:white;',
+        '登录成功': 'background:#10b981;color:white;',
         'login_failed': 'background:#ef4444;color:white;',
+        '登录失败': 'background:#ef4444;color:white;',
         'create': 'background:#3b82f6;color:white;',
+        '创建': 'background:#3b82f6;color:white;',
         'update': 'background:#f59e0b;color:white;',
+        '更新': 'background:#f59e0b;color:white;',
         'delete': 'background:#ef4444;color:white;',
+        '删除': 'background:#ef4444;color:white;',
         'delete_all': 'background:#dc2626;color:white;',
+        '批量删除': 'background:#dc2626;color:white;',
         'publish': 'background:#8b5cf6;color:white;',
+        '发布': 'background:#8b5cf6;color:white;',
         'switch': 'background:#6366f1;color:white;',
-        'clear': 'background:#64748b;color:white;'
+        '切换': 'background:#6366f1;color:white;',
+        'clear': 'background:#64748b;color:white;',
+        '清空': 'background:#64748b;color:white;',
+        '创建用户': 'background:#3b82f6;color:white;',
+        '更新用户': 'background:#f59e0b;color:white;',
+        '删除用户': 'background:#ef4444;color:white;',
+        '修改密码': 'background:#8b5cf6;color:white;',
+        '创建题目': 'background:#3b82f6;color:white;',
+        '更新题目': 'background:#f59e0b;color:white;',
+        '删除题目': 'background:#ef4444;color:white;',
+        '删除所有题目': 'background:#dc2626;color:white;',
+        '创建试卷': 'background:#3b82f6;color:white;',
+        '更新试卷': 'background:#f59e0b;color:white;',
+        '发布试卷': 'background:#8b5cf6;color:white;',
+        '删除试卷': 'background:#ef4444;color:white;',
+        '切换数据库': 'background:#6366f1;color:white;',
+        '清空日志': 'background:#64748b;color:white;'
+    };
+
+    const targetStyles = {
+        'user': 'background:rgba(59,130,246,0.1);color:#60a5fa;border:1px solid rgba(59,130,246,0.2);',
+        'question': 'background:rgba(16,185,129,0.1);color:#34d399;border:1px solid rgba(16,185,129,0.2);',
+        'paper': 'background:rgba(245,158,11,0.1);color:#fbbf24;border:1px solid rgba(245,158,11,0.2);',
+        'database': 'background:rgba(99,102,241,0.1);color:#818cf8;border:1px solid rgba(99,102,241,0.2);',
+        'logs': 'background:rgba(100,116,139,0.1);color:#94a3b8;border:1px solid rgba(100,116,139,0.2);'
     };
 
     const rows = logs.map(log => {
-        const time = new Date(log.createdAt).toLocaleString('zh-CN');
+        const time = formatFullDateTime(log.createdAt);
         const actionLabel = actionLabels[log.action] || log.action;
         const targetLabel = targetLabels[log.target] || log.target;
         const actionStyle = actionStyles[log.action] || 'background:#94a3b8;color:white;';
+        const targetStyle = targetStyles[log.target] || 'background:rgba(255,255,255,0.05);color:var(--text-primary);border:1px solid rgba(255,255,255,0.1);';
 
         let detailsStr = '-';
         if (typeof log.details === 'string') {
@@ -2774,7 +3189,7 @@ function renderSystemLogs(logs) {
             if (log.details.type) parts.push('类型: ' + log.details.type);
             if (log.details.role) parts.push('角色: ' + log.details.role);
             if (log.details.dbType) parts.push('数据库: ' + log.details.dbType);
-            if (log.details.beforeDate) parts.push('清理日期: ' + log.details.beforeDate);
+            if (log.details.beforeDate) parts.push('清理日期: ' + formatFullDateTime(log.details.beforeDate));
             detailsStr = parts.join(', ') || '-';
         } else if (log.details !== null && log.details !== undefined) {
             detailsStr = String(log.details);
@@ -2788,6 +3203,7 @@ function renderSystemLogs(logs) {
             actionLabel,
             targetLabel,
             actionStyle,
+            targetStyle,
             detailsStr,
             ip,
             username
@@ -2800,21 +3216,21 @@ function renderSystemLogs(logs) {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="width:160px;">时间</th>
-                            <th style="width:100px;">操作</th>
-                            <th style="width:80px;">对象</th>
-                            <th style="width:120px;">操作者</th>
+                            <th style="width:180px;">时间</th>
+                            <th style="width:120px;">对象</th>
+                            <th style="width:140px;">操作</th>
+                            <th style="width:180px;">操作者</th>
                             <th>详情</th>
-                            <th style="width:120px;">IP地址</th>
+                            <th style="width:130px;">IP地址</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${rows.map(r => `
                             <tr>
-                                <td style="font-size:13px;color:var(--text-secondary);">${escapeHtml(r.time)}</td>
-                                <td><span class="badge" style="${r.actionStyle}font-size:11px;padding:3px 8px;border-radius:4px;">${escapeHtml(r.actionLabel)}</span></td>
-                                <td style="font-size:13px;">${escapeHtml(r.targetLabel)}</td>
-                                <td style="font-size:13px;">${escapeHtml(r.username)}</td>
+                                <td style="font-size:13px;color:var(--text-secondary);white-space:nowrap;">${escapeHtml(r.time)}</td>
+                                <td><span class="badge" style="${r.targetStyle}font-size:11px;padding:3px 8px;border-radius:4px;white-space:nowrap;display:inline-block;min-width:60px;text-align:center;">${escapeHtml(r.targetLabel)}</span></td>
+                                <td><span class="badge" style="${r.actionStyle}font-size:11px;padding:3px 8px;border-radius:4px;white-space:nowrap;display:inline-block;min-width:60px;text-align:center;">${escapeHtml(r.actionLabel)}</span></td>
+                                <td style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(r.username)}">${escapeHtml(r.username)}</td>
                                 <td style="font-size:13px;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.detailsStr)}">${escapeHtml(r.detailsStr)}</td>
                                 <td style="font-size:12px;color:var(--text-muted);font-family:monospace;">${escapeHtml(r.ip)}</td>
                             </tr>
@@ -2827,11 +3243,11 @@ function renderSystemLogs(logs) {
             ${rows.map(r => `
                 <div class="log-card">
                     <div class="log-card-top">
-                        <span class="log-card-action" style="${r.actionStyle}">${escapeHtml(r.actionLabel)}</span>
-                        <span class="log-card-operator">${escapeHtml(r.username)}</span>
+                        <span class="log-card-target" style="${r.targetStyle}font-size:11px;padding:2px 6px;border-radius:4px;margin-right:6px;white-space:nowrap;">${escapeHtml(r.targetLabel)}</span>
+                        <span class="log-card-action" style="${r.actionStyle}font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;">${escapeHtml(r.actionLabel)}</span>
+                        <span class="log-card-operator" style="margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;">${escapeHtml(r.username)}</span>
                     </div>
                     <div class="log-card-middle">
-                        <span class="log-card-target">${escapeHtml(r.targetLabel)}</span>
                         <span class="log-card-details">${escapeHtml(r.detailsStr)}</span>
                     </div>
                     <div class="log-card-bottom">
@@ -2915,36 +3331,26 @@ function resetLogFilters() {
 }
 
 function showClearLogsModal() {
-    // 计算30天前的日期作为默认值
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const defaultDate = thirtyDaysAgo.toISOString().split('T')[0];
-
-    openModal('清理历史日志',
-        `<div class="form-group">
-            <label class="form-label">清理此日期之前的日志</label>
-            <input type="date" class="form-input" id="clear-logs-date" value="${defaultDate}">
-            <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">留空则清理所有日志</p>
-        </div>
-        <div style="padding:12px;background:rgba(239,68,68,0.1);border-radius:var(--radius-md);margin-top:12px;">
-            <p style="color:var(--danger);font-size:13px;margin:0;"><strong>警告：</strong>此操作不可撤销！</p>
+    openModal('清空系统日志',
+        `<div style="padding:16px; text-align:center;">
+            <p style="font-size:16px; margin-bottom:12px;">确定要清空所有系统日志吗？</p>
+            <div style="padding:12px;background:rgba(239,68,68,0.1);border-radius:var(--radius-md);">
+                <p style="color:var(--danger);font-size:13px;margin:0;"><strong>警告：</strong>此操作将删除全部历史记录，且不可撤销！</p>
+            </div>
         </div>`,
         `<button class="btn btn-secondary" onclick="closeModal()">取消</button>
-         <button class="btn btn-danger" onclick="confirmClearLogs()">确认清理</button>`
+         <button class="btn btn-danger" onclick="confirmClearLogs()">确认清空</button>`
     );
 }
 
 async function confirmClearLogs() {
-    const dateInput = document.getElementById('clear-logs-date');
-    const beforeDate = dateInput?.value ? dateInput.value + 'T23:59:59.999Z' : null;
-
     try {
-        await Storage.clearSystemLogs(beforeDate);
+        await Storage.clearSystemLogs(null);
         closeModal();
-        showAlert('日志清理成功');
+        showAlert('日志清空成功');
         loadSystemLogs(1);
     } catch (e) {
-        showAlert('清理失败: ' + e.message);
+        showAlert('清空失败: ' + e.message);
     }
 }
 

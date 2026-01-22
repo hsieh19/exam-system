@@ -43,6 +43,21 @@ async function authFetch(url, options = {}) {
       }
       return Promise.reject('Unauthorized');
     }
+    if (res.status === 403) {
+      // 检查是否是强制修改密码
+      const clone = res.clone();
+      try {
+        const data = await clone.json();
+        if (data.forcePasswordChange) {
+          if (!window.location.pathname.endsWith('index.html')) {
+            window.location.href = 'index.html';
+          }
+          return Promise.reject('ForcePasswordChange');
+        }
+      } catch (e) {
+        // 解析失败则忽略
+      }
+    }
     return res;
   } catch (e) {
     console.error('Network error', e);
@@ -95,6 +110,25 @@ const Storage = {
     }).catch(err => {
       console.error('Login error:', err);
       return null;
+    });
+  },
+
+  changePassword(oldPassword, newPassword) {
+    return authFetch(`${API_BASE}/api/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword, newPassword })
+    }).then(async r => {
+      const data = await r.json();
+      if (r.ok) {
+        // 更新本地存储的 isFirstLogin 状态
+        if (currentUser) {
+          currentUser.isFirstLogin = 0;
+          SafeStorage.set('current_user', JSON.stringify(currentUser));
+        }
+        return data;
+      }
+      throw new Error(data.error || '修改密码失败');
     });
   },
 
@@ -207,6 +241,10 @@ const Storage = {
     return authFetch(`${API_BASE}/api/papers`).then(r => r.json());
   },
 
+  getRankingPapers() {
+    return authFetch(`${API_BASE}/api/papers/ranking-list`).then(r => r.json());
+  },
+
   getPaperById(id) {
     return authFetch(`${API_BASE}/api/papers/${id}`).then(r => r.json());
   },
@@ -221,6 +259,14 @@ const Storage = {
 
   addPaperWithRules(paper) {
     return this.addPaper(paper);
+  },
+
+  updatePaper(paper) {
+    return authFetch(`${API_BASE}/api/papers/${paper.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paper)
+    }).then(r => r.json());
   },
 
   publishPaper(paperId, targetGroups, targetUsers, deadline) {
@@ -245,6 +291,14 @@ const Storage = {
 
   getExamPaper(paperId) {
     return authFetch(`${API_BASE}/api/exam/${paperId}`).then(r => r.json());
+  },
+
+  updateExamSession(paperId, answers, lastQuestionStartTime) {
+    return authFetch(`${API_BASE}/api/exam/${paperId}/session`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers, lastQuestionStartTime })
+    }).then(r => r.json());
   },
 
   // ==================== 记录相关 ====================
@@ -322,10 +376,9 @@ const Storage = {
     return authFetch(url).then(r => r.json());
   },
 
-  clearSystemLogs(beforeDate) {
+  clearSystemLogs() {
     return authFetch(`${API_BASE}/api/logs`, {
-      method: 'DELETE',
-      body: JSON.stringify({ beforeDate })
+      method: 'DELETE'
     }).then(r => r.json());
   }
 };
