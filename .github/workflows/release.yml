@@ -23,9 +23,28 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build executable
+      - name: Build and Package
         run: |
+          # 1. 构建二进制文件
           npx pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --out-path dist
+          
+          # 2. 准备发布目录
+          mkdir -p pkg/win pkg/linux pkg/macos
+          
+          # 3. 复制文件并重命名为更友好的名称
+          cp dist/exam-system-win.exe pkg/win/exam-system.exe
+          cp dist/exam-system-linux pkg/linux/exam-system
+          cp dist/exam-system-macos pkg/macos/exam-system
+          
+          # 4. 复制 .env.example 到每个包
+          cp .env.example pkg/win/
+          cp .env.example pkg/linux/
+          cp .env.example pkg/macos/
+          
+          # 5. 压缩打包
+          cd pkg/win && zip -r ../../exam-system-windows-x64.zip . && cd ../..
+          cd pkg/linux && tar -czvf ../../exam-system-linux-x64.tar.gz . && cd ../..
+          cd pkg/macos && tar -czvf ../../exam-system-macos-x64.tar.gz . && cd ../..
 
       - name: Extract Changelog
         id: extract_changelog
@@ -34,17 +53,17 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "Extracting changelog for version $VERSION"
           # 使用 awk 提取对应版本的更新日志
-          # 逻辑：从匹配 ## [VERSION] 开始，到下一个 ## [ 结束（或文件末尾）
           awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p' CHANGELOG.md > RELEASE_NOTES.md
-          echo "Changelog extracted:"
-          cat RELEASE_NOTES.md
 
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           body_path: RELEASE_NOTES.md
-          files: dist/*
+          files: |
+            exam-system-windows-x64.zip
+            exam-system-linux-x64.tar.gz
+            exam-system-macos-x64.tar.gz
           draft: false
           prerelease: false
         env:
