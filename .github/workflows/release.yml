@@ -27,10 +27,23 @@ jobs:
         run: |
           npx pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --out-path dist
 
+      - name: Extract Changelog
+        id: extract_changelog
+        run: |
+          # 获取版本号 (去掉 v)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Extracting changelog for version $VERSION"
+          # 使用 awk 提取对应版本的更新日志
+          # 逻辑：从匹配 ## [VERSION] 开始，到下一个 ## [ 结束（或文件末尾）
+          awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p' CHANGELOG.md > RELEASE_NOTES.md
+          echo "Changelog extracted:"
+          cat RELEASE_NOTES.md
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
+          body_path: RELEASE_NOTES.md
           files: dist/*
           draft: false
           prerelease: false
