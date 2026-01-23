@@ -51,9 +51,19 @@ jobs:
         run: |
           # 获取版本号 (去掉 v)
           VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracting changelog for version $VERSION"
-          # 使用 awk 提取对应版本的更新日志
+          
+          # 提取当前版本的更新日志全文 (用于 GitHub Release)
           awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p' CHANGELOG.md > RELEASE_NOTES.md
+          
+          # 提取三级标题作为摘要 (用于飞书通知)
+          SUMMARY=$(awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p && /^### / { print "▫️ " substr($0, 5) }' CHANGELOG.md)
+          
+          # 设置多行输出变量
+          echo "SUMMARY<<EOF" >> $GITHUB_OUTPUT
+          echo "$SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         id: create_release
@@ -74,6 +84,12 @@ jobs:
         with:
           FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           FEISHU_BOT_SIGNKEY: ${{ secrets.FEISHU_SECRET }}
-          # 这样会自动抓取 Release 的标题和内容生成精美的卡片
-          MSG_TYPE: "interactive"
+          MSG_TYPE: "markdown"
           TITLE: "考试系统版本更新通知"
+          CONTENT: |
+            **版本**: v${{ steps.extract_changelog.outputs.VERSION }}
+            **更新内容**:
+            ${{ steps.extract_changelog.outputs.SUMMARY }}
+            
+            ---
+            [查看完整更新日志](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.extract_changelog.outputs.VERSION }})
