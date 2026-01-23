@@ -55,7 +55,7 @@ jobs:
           echo "Extracting changelog for version $VERSION"
           
           # 获取发布时间 (北京时间)
-          RELEASE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d-%H-%M')
+          RELEASE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
           echo "RELEASE_TIME=$RELEASE_TIME" >> $GITHUB_OUTPUT
           
           # 提取当前版本的更新日志全文 (用于 GitHub Release)
