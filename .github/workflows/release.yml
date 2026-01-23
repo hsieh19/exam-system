@@ -68,3 +68,12 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 通知飞书群
+        uses: XRSec/feishu-bot-webhook-action@v1
+        with:
+          FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          FEISHU_BOT_SIGNKEY: ${{ secrets.FEISHU_SECRET }}
+          # 这样会自动抓取 Release 的标题和内容生成精美的卡片
+          MSG_TYPE: "interactive"
+          TITLE: "考试系统版本更新通知"

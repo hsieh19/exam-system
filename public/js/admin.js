@@ -262,15 +262,20 @@ function loadGroups() {
         const isActive = selectedGroupId === g.id;
         const activeStyle = isActive ? 'background-color: rgba(37, 99, 235, 0.1); border-left: 3px solid var(--primary);' : 'border-left: 3px solid transparent;';
 
-        // 只有超管可以删除分组
+        // 只有超管可以编辑和删除分组
+        const editBtn = user.role === 'super_admin' ?
+            `<button class="btn btn-sm btn-primary" style="margin-right: 5px;" onclick="event.stopPropagation();showEditGroup('${g.id}', '${escapeHtml(g.name)}')">编辑</button>` : '';
         const deleteBtn = user.role === 'super_admin' ?
             `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>` : '';
 
         return `
                     <div class="group-item" onclick="selectGroup('${g.id}')" 
-                         style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle}">
-                        <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}">${escapeHtml(g.name)}</span>
-                        ${deleteBtn}
+                         style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle} min-width: 0;">
+                        <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 12px;">${escapeHtml(g.name)}</span>
+                        <div style="display: flex; align-items: center; flex-shrink: 0;">
+                            ${editBtn}
+                            ${deleteBtn}
+                        </div>
                     </div>
                     `;
     }).join('')}
@@ -355,6 +360,30 @@ async function saveGroup() {
     }
 }
 
+function showEditGroup(id, currentName) {
+    openModal('编辑分组',
+        `<div class="form-group"><label class="form-label">分组名称</label><input type="text" class="form-input" id="edit-group-name" value="${escapeHtml(currentName)}"></div>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="updateGroupName('${id}')">更新</button>`);
+}
+
+async function updateGroupName(id) {
+    const name = document.getElementById('edit-group-name').value.trim();
+    if (name) {
+        try {
+            await Storage.updateGroup({ id, name });
+            closeModal();
+            await refreshCache();
+            loadGroups();
+            showToast('分组名称已更新');
+        } catch (error) {
+            console.error('Update group failed:', error);
+            showToast('更新失败：' + error.message, 'error');
+        }
+    } else {
+        showToast('请输入分组名称', 'warning');
+    }
+}
+
 
 
 // ========== 用户管理 ==========
@@ -388,7 +417,7 @@ function renderUsers() {
         ? `<div class="user-cards">${users.map(u => {
             const isSuper = u.role === 'super_admin';
             const isGroupAdmin = u.role === 'group_admin';
-            const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
+            const nameStyle = (isSuper || isGroupAdmin) ? 'color: var(--primary); font-weight: bold;' : '';
 
             const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
                 isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
@@ -426,11 +455,11 @@ function renderUsers() {
             </div>
           </div>`;
         }).join('')}</div>`
-        : `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="text-center user-actions-header">操作</th></tr></thead>
+        : `<div class="table-container"><table class="data-table"><thead><tr><th>用户名</th><th>分组</th><th class="user-actions-header" style="text-align: left; padding-left: 20px;">操作</th></tr></thead>
     <tbody>${users.map(u => {
             const isSuper = u.role === 'super_admin';
             const isGroupAdmin = u.role === 'group_admin';
-            const nameStyle = (isSuper || isGroupAdmin) ? 'color: #2563eb; font-weight: bold;' : '';
+            const nameStyle = (isSuper || isGroupAdmin) ? 'color: var(--primary); font-weight: bold;' : '';
 
             const roleBadge = isSuper ? '<span class="badge badge-primary" style="margin-left:5px;font-size:10px;">超管</span>' :
                 isGroupAdmin ? '<span class="badge badge-warning" style="margin-left:5px;font-size:10px;">组管</span>' : '';
@@ -478,7 +507,7 @@ function renderUsers() {
                 ${roleBadge}
             </td>
             <td>${escapeHtml(getGroupName(u.groupId))}</td>
-            <td class="text-center"><div class="user-actions">${all || '<span class="text-muted">无</span>'}</div></td></tr>`;
+            <td style="text-align: left; padding-left: 20px;"><div class="user-actions">${all || '<span class="text-muted">无</span>'}</div></td></tr>`;
             }
         }).join('')}</tbody></table></div>`) : '<p class="text-muted">暂无用户</p>';
     document.getElementById('users-list').innerHTML = html;
@@ -1574,14 +1603,17 @@ function loadPaperGroups() { }
 function loadPapers() {
     const papers = cachedData.papers;
     const currentUser = Storage.getCurrentUser();
-    const getGroupName = (id) => cachedData.groups.find(g => g.id === id)?.name || '公共/全员';
+    const getAdminName = (groupId) => {
+        if (!groupId) return '超级管理员';
+        return cachedData.groups.find(g => g.id === groupId)?.name || '未知分组';
+    };
 
-    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>归属分组</th><th style="width:180px;">创建日期</th><th>状态</th><th>操作</th></tr></thead>
+    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>试卷管理员</th><th style="width:180px;">创建日期</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>${papers.map(p => {
-        const canManage = currentUser.role === 'super_admin' || p.groupId === currentUser.groupId;
+        const canManage = currentUser.role === 'super_admin' || p.creatorId === currentUser.id;
         return `<tr>
       <td>${escapeHtml(p.name)}</td>
-      <td>${escapeHtml(getGroupName(p.groupId))}</td>
+      <td>${escapeHtml(getAdminName(p.groupId))}</td>
       <td style="white-space:nowrap;">${formatFullDateTime(p.createDate)}</td>
       <td><span class="badge ${p.published ? 'badge-success' : 'badge-warning'}">${p.published ? '已发布' : '草稿'}</span></td>
       <td>
@@ -2308,26 +2340,107 @@ async function loadAdminRanking(paperId) {
 
 
 // ========== 导入导出功能 ==========
-function exportQuestions() {
-    const questions = cachedData.questions;
+async function handleExportClick() {
+    const user = Storage.getCurrentUser();
+    const isSuper = user.role === 'super_admin';
+    const groups = cachedData.groups;
+
+    let optionsHtml = '';
+    if (isSuper) {
+        optionsHtml += `<option value="all">所有题库 (每个题库独立导出)</option>`;
+        optionsHtml += `<option value="public">公共题库</option>`;
+        groups.forEach(g => {
+            optionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
+        });
+    } else {
+        const myGroup = groups.find(g => g.id === user.groupId);
+        if (myGroup) {
+            optionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
+        }
+    }
+
+    const bodyHtml = `
+        <div class="form-group">
+            <label class="form-label">请选择要导出的题库</label>
+            <select id="export-group-select" class="form-input">
+                ${optionsHtml}
+            </select>
+        </div>
+        <div style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
+            * 导出文件将以“题库名称_时间”命名。
+        </div>
+    `;
+
+    openModal('导出题库', bodyHtml, `
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="executeExport()">开始导出</button>
+    `);
+}
+
+async function executeExport() {
+    const groupId = document.getElementById('export-group-select').value;
+    const btn = document.querySelector('#modal-footer .btn-primary');
+    btn.disabled = true;
+    btn.textContent = '导出中...';
+
+    try {
+        if (groupId === 'all') {
+            const zip = new JSZip();
+            // 导出所有，包括公共和每个分组
+            await exportQuestionsByGroup('public', '公共题库', zip);
+            for (const g of cachedData.groups) {
+                await exportQuestionsByGroup(g.id, g.name, zip);
+            }
+            
+            const content = await zip.generateAsync({ type: "blob" });
+            const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
+            const zipFileName = `全量题库备份_${timeStr}.zip`;
+            
+            // 下载 ZIP 文件
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = zipFileName;
+            link.click();
+        } else if (groupId === 'public') {
+            await exportQuestionsByGroup('public', '公共题库');
+        } else {
+            const g = cachedData.groups.find(group => group.id === groupId);
+            await exportQuestionsByGroup(groupId, g ? g.name : '未知题库');
+        }
+        closeModal();
+    } catch (e) {
+        console.error(e);
+        showAlert('导出失败: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '开始导出';
+    }
+}
+
+async function exportQuestionsByGroup(groupId, groupName, zip = null) {
+    let questions = cachedData.questions;
+    if (groupId === 'public') {
+        questions = questions.filter(q => !q.groupId);
+    } else {
+        questions = questions.filter(q => q.groupId === groupId);
+    }
+
     const types = { 'single': '单选题', 'multiple': '多选题', 'judge': '判断题' };
     const wb = XLSX.utils.book_new();
 
     ['single', 'multiple', 'judge'].forEach(type => {
         const typeName = types[type];
         const data = questions.filter(q => q.type === type).map(q => {
-            // Helper to get name from ID
             const getCatName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '';
 
             const row = {
                 '专业': getCatName(q.category),
                 '设备类型': getCatName(q.deviceType),
+                '题库归属': groupName,
                 '题目': q.content,
                 '正确答案': Array.isArray(q.answer) ? q.answer.join(',') :
                     (type === 'judge' ? (q.answer === 'true' ? 'A' : 'B') : q.answer)
             };
 
-            // Judge type: force display options
             const opts = (type === 'judge') ? ['正确', '错误'] : (q.options || []);
             opts.forEach((opt, idx) => {
                 const label = '选项' + String.fromCharCode(65 + idx);
@@ -2337,15 +2450,17 @@ function exportQuestions() {
         });
 
         if (data.length > 0) {
-            // Calculate max cols
             let maxOptions = 0;
-            data.forEach(r => {
-                const keys = Object.keys(r).filter(k => k.startsWith('选项'));
-                maxOptions = Math.max(maxOptions, keys.length);
-            });
+            if (type === 'judge') {
+                maxOptions = 2;
+            } else {
+                data.forEach(r => {
+                    const keys = Object.keys(r).filter(k => k.startsWith('选项'));
+                    maxOptions = Math.max(maxOptions, keys.length);
+                });
+            }
 
-            // Ensure headers
-            const header = ['专业', '设备类型', '题目', '正确答案'];
+            const header = ['专业', '设备类型', '题库归属', '题目', '正确答案'];
             for (let i = 0; i < maxOptions; i++) {
                 header.push('选项' + String.fromCharCode(65 + i));
             }
@@ -2353,13 +2468,30 @@ function exportQuestions() {
             const ws = XLSX.utils.json_to_sheet(data, { header });
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         } else {
-            // Create empty sheet with header
-            const ws = XLSX.utils.json_to_sheet([], { header: ['专业', '设备类型', '题目', '正确答案', '选项A', '选项B', '选项C', '选项D'] });
+            const emptyHeader = ['专业', '设备类型', '题库归属', '题目', '正确答案', '选项A', '选项B'];
+            if (type !== 'judge') {
+                emptyHeader.push('选项C', '选项D');
+            }
+            const ws = XLSX.utils.json_to_sheet([], { header: emptyHeader });
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         }
     });
 
-    XLSX.writeFile(wb, `题库导出_${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}${new Date().getDate().toString().padStart(2, '0')}.xlsx`);
+    if (wb.SheetNames.length > 0) {
+        const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
+        const fileName = `${groupName}_${timeStr}.xlsx`;
+        
+        if (zip) {
+            const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            zip.file(fileName, excelBuffer);
+        } else {
+            XLSX.writeFile(wb, fileName);
+        }
+    }
+}
+
+function exportQuestions() {
+    handleExportClick();
 }
 
 async function importQuestions(input) {
@@ -2390,11 +2522,12 @@ async function importQuestions(input) {
                 const getColIdx = (name) => header.indexOf(name);
                 const idxCategory = getColIdx('专业');
                 const idxDeviceType = getColIdx('设备类型');
+                const idxGroup = getColIdx('题库归属');
                 const idxContent = getColIdx('题目');
                 const idxAnswer = getColIdx('正确答案');
 
-                if (idxCategory === -1 || idxContent === -1 || idxAnswer === -1 || idxDeviceType === -1) {
-                    errorMsg += `工作表"${sheetName}"缺少必要列字段(专业、设备类型、题目、正确答案)\n`;
+                if (idxCategory === -1 || idxContent === -1 || idxAnswer === -1 || idxDeviceType === -1 || idxGroup === -1) {
+                    errorMsg += `工作表"${sheetName}"缺少必要列字段(专业、设备类型、题库归属、题目、正确答案)\n`;
                     continue;
                 }
 
@@ -2415,11 +2548,38 @@ async function importQuestions(input) {
                     const content = row[idxContent];
                     const answerRaw = row[idxAnswer];
                     const deviceTypeRaw = row[idxDeviceType];
+                    const groupRaw = row[idxGroup];
 
-                    if (!categoryRaw && !content && !answerRaw && !deviceTypeRaw) continue;
-                    if (!categoryRaw || !content || answerRaw === undefined || !deviceTypeRaw) {
-                        errorMsg += `工作表"${sheetName}"第${i + 1}行缺少必要信息(专业、设备类型、题目、正确答案)\n`;
+                    if (!categoryRaw && !content && !answerRaw && !deviceTypeRaw && !groupRaw) continue;
+                    if (!categoryRaw || !content || answerRaw === undefined || !deviceTypeRaw || !groupRaw) {
+                        errorMsg += `工作表"${sheetName}"第${i + 1}行缺少必要信息(专业、设备类型、题库归属、题目、正确答案)\n`;
                         continue;
+                    }
+
+                    // Resolve Group ID (Strict)
+                    const groupName = String(groupRaw).trim();
+                    let rowGroupId = null;
+                    if (groupName === '公共题库') {
+                        rowGroupId = null;
+                    } else {
+                        const groupObj = cachedData.groups.find(g => g.name === groupName);
+                        if (!groupObj) {
+                            errorMsg += `工作表"${sheetName}"第${i + 1}行错误：系统中不存在题库 "${groupName}"。\n`;
+                            continue;
+                        }
+                        rowGroupId = groupObj.id;
+                    }
+
+                    // Validate if it matches the import target (if not importing all)
+                    if (importTargetGroupId !== 'all') {
+                        if (importTargetGroupId === 'public' && rowGroupId !== null) {
+                            errorMsg += `工作表"${sheetName}"第${i + 1}行错误：当前选择导入到公共题库，但题目归属为 "${groupName}"。\n`;
+                            continue;
+                        }
+                        if (importTargetGroupId !== 'public' && rowGroupId !== importTargetGroupId) {
+                            errorMsg += `工作表"${sheetName}"第${i + 1}行错误：当前选择导入到 "${importTargetGroupName}"，但题目归属为 "${groupName}"。\n`;
+                            continue;
+                        }
                     }
 
                     // Resolve Category ID (Strict)
@@ -2474,7 +2634,7 @@ async function importQuestions(input) {
                         content: String(content).trim(),
                         options: options,
                         answer: answer,
-                        groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null
+                        groupId: rowGroupId
                     });
                 }
             }
@@ -2502,23 +2662,89 @@ async function importQuestions(input) {
     reader.readAsArrayBuffer(file);
 }
 
+let importTargetGroupId = null;
+let importTargetGroupName = '';
+
 function handleImportClick() {
     const user = Storage.getCurrentUser();
     const isSuper = user.role === 'super_admin';
+    const groups = cachedData.groups;
 
+    let optionsHtml = '';
+    if (isSuper) {
+        optionsHtml += `<option value="all">所有题库 (清空全部并导入)</option>`;
+        optionsHtml += `<option value="public">公共题库</option>`;
+        groups.forEach(g => {
+            optionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
+        });
+    } else {
+        const myGroup = groups.find(g => g.id === user.groupId);
+        if (myGroup) {
+            optionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
+        }
+    }
+
+    const bodyHtml = `
+        <div class="form-group">
+            <label class="form-label">请选择导入的目标题库</label>
+            <select id="import-group-select" class="form-input">
+                ${optionsHtml}
+            </select>
+        </div>
+        <div style="margin-top:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--warning);">
+            <p style="color:var(--danger);font-weight:bold;margin-bottom:8px;">⚠️ 导入提醒：</p>
+            <p style="font-size:13px;line-height:1.6;">
+                导入操作会<span style="color:var(--danger);font-weight:bold;">彻底清空所选题库</span>中的现有数据。
+                建议在操作前先导出备份。
+            </p>
+        </div>
+    `;
+
+    openModal('导入题库', bodyHtml, `
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-danger" onclick="proceedToImportFile()">确定清空并选择文件</button>
+    `);
+}
+
+function proceedToImportFile() {
+    const select = document.getElementById('import-group-select');
+    importTargetGroupId = select.value;
+    importTargetGroupName = select.options[select.selectedIndex].text;
+    
+    closeModal();
+    setTimeout(() => {
+        document.getElementById('file-import').click();
+    }, 200);
+}
+
+// 替换 confirmImportQuestions
+function confirmImportQuestions(newQuestions) {
     showConfirmModal({
-        title: '导入提醒',
-        message: isSuper
-            ? '导入操作会<span style="color:var(--danger);font-weight:bold;">彻底清空所有</span>现有题库数据（包括各分组题库），强烈建议您在操作前先导出题库进行备份。是否确认为继续导入？'
-            : '导入操作会将题目直接<span style="color:var(--primary);font-weight:bold;">追加到您的机房题库</span>中。确认是否继续导入？',
-        confirmText: isSuper ? '继续清空导入' : '继续追加导入',
-        confirmType: isSuper ? 'danger' : 'primary',
+        title: '确认导入',
+        message: `解析成功，共${newQuestions.length}道题。<br>目标题库：<strong>${importTargetGroupName}</strong><br><br><span style="color:var(--danger);font-weight:bold;">警告：这将彻底清空“${importTargetGroupName}”中的现有题目！</span>`,
+        confirmText: '确认清空并导入',
+        confirmType: 'danger',
         isHtml: true,
         onConfirm: async () => {
-            closeModal();
-            setTimeout(() => {
-                document.getElementById('file-import').click();
-            }, 200);
+            try {
+                // 1. 清空目标题库
+                await Storage.deleteAllQuestions(importTargetGroupId);
+
+                // 2. 批量添加
+                const batchSize = 50;
+                for (let i = 0; i < newQuestions.length; i += batchSize) {
+                    const batch = newQuestions.slice(i, i + batchSize);
+                    await Promise.all(batch.map(q => Storage.addQuestion(q)));
+                }
+
+                showAlert(`已清空“${importTargetGroupName}”并成功导入 ${newQuestions.length} 道题目`);
+                closeModal();
+                await refreshCache();
+                loadQuestions();
+            } catch (err) {
+                console.error(err);
+                showAlert('导入出错：' + err.message);
+            }
         }
     });
 }
@@ -2766,40 +2992,6 @@ async function deletePaper(id) {
     });
 }
 
-// 替换 importQuestions 中的 confirm
-function confirmImportQuestions(newQuestions) {
-    const user = Storage.getCurrentUser();
-    const isSuper = user.role === 'super_admin';
-
-    showConfirmModal({
-        title: '确认导入',
-        message: `解析成功，共${newQuestions.length}道题。<br>确认导入吗？${isSuper ? '这将<span style="color:var(--danger);font-weight:bold;">彻底清空所有</span>现有题库。' : '题目将追加到您的机房题库中。'}`,
-        confirmText: isSuper ? '确认清空并导入' : '确认导入',
-        confirmType: isSuper ? 'danger' : 'primary',
-        isHtml: true,
-        onConfirm: async () => {
-            try {
-                // 1. 如果是超管且确认清空
-                if (isSuper) {
-                    await Storage.deleteAllQuestions();
-                }
-
-                // 2. 添加
-                // 批量添加，为了防止并发过大，可以分批或者串行
-                // 这里暂时保持 Promise.all
-                await Promise.all(newQuestions.map(q => Storage.addQuestion(q)));
-
-                showAlert(isSuper ? `已清空旧数据并成功导入 ${newQuestions.length} 道题目` : `成功追加导入 ${newQuestions.length} 道题目`);
-                closeModal();
-                await refreshCache();
-                loadQuestions();
-            } catch (err) {
-                console.error(err);
-                showAlert('导入出错：' + err.message);
-            }
-        }
-    });
-}
 
 // 替换 clearExamRecords
 async function clearExamRecords(paperId) {

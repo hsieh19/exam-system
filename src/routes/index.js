@@ -349,6 +349,13 @@ module.exports = function initRoutes(app, context) {
         broadcast('db_change', { resource: 'groups' });
     });
 
+    app.put('/api/groups/:id', superAdminMiddleware, async (req, res) => {
+        const group = { ...req.body, id: req.params.id };
+        const result = await db.updateGroup(group);
+        res.json(result);
+        broadcast('db_change', { resource: 'groups' });
+    });
+
     app.delete('/api/groups/:id', superAdminMiddleware, async (req, res) => {
         await db.deleteGroup(req.params.id);
         res.json({ success: true });
@@ -405,9 +412,19 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.delete('/api/questions/all', adminMiddleware, async (req, res) => {
-        await db.deleteAllQuestions();
+        const { groupId } = req.query;
+        
+        // 权限检查
+        if (req.user.role !== 'super_admin') {
+            // 组管只能删除本组题库，不能删除全部或公共
+            if (!groupId || groupId === 'all' || groupId === 'public' || groupId !== req.user.groupId) {
+                return res.status(403).json({ error: '无权执行此操作' });
+            }
+        }
+
+        await db.deleteQuestions(groupId);
         // 记录日志
-        await logAction('删除所有题目', 'question', null, req.user, {}, getClientIp(req));
+        await logAction('删除题库', 'question', null, req.user, { groupId: groupId || 'all' }, getClientIp(req));
         res.json({ success: true });
         broadcast('db_change', { resource: 'questions' });
     });
@@ -494,9 +511,7 @@ module.exports = function initRoutes(app, context) {
     app.get('/api/papers', adminMiddleware, async (req, res) => {
         const filter = {};
         if (req.user.role !== 'super_admin') {
-            // 如无分组ID，视为无权限查看试卷
-            if (!req.user.groupId) return res.json([]);
-            filter.groupId = req.user.groupId;
+            filter.creatorId = req.user.id;
         }
         res.json(await db.getPapers(filter));
     });
@@ -504,7 +519,7 @@ module.exports = function initRoutes(app, context) {
     app.get('/api/papers/:id', adminMiddleware, async (req, res) => {
         const paper = await db.getPaperById(req.params.id);
         if (paper) {
-            if (req.user.role !== 'super_admin' && paper.groupId !== req.user.groupId) {
+            if (req.user.role !== 'super_admin' && paper.creatorId !== req.user.id) {
                 return res.status(403).json({ error: '无权访问该试卷' });
             }
             res.json(paper);
@@ -536,7 +551,7 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
             return res.status(403).json({ error: '无权修改' });
         }
 
@@ -564,7 +579,7 @@ module.exports = function initRoutes(app, context) {
         }
 
         // 权限检查
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
             return res.status(403).json({ error: '无权发布该试卷' });
         }
 
@@ -610,7 +625,7 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
             return res.status(403).json({ error: '无权查看' });
         }
 
@@ -622,7 +637,7 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
             return res.status(403).json({ error: '无权删除' });
         }
 

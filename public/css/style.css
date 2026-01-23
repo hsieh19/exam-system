@@ -660,8 +660,8 @@ a:hover {
 }
 
 .users-groups-pane {
-  width: 300px;
-  min-width: 300px;
+  width: 480px;
+  min-width: 480px;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -728,7 +728,7 @@ a:hover {
 .user-actions {
   display: flex;
   gap: 4px;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   flex-wrap: nowrap;
   white-space: nowrap;

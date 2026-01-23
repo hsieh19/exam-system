@@ -940,6 +940,10 @@ module.exports = {
         await run("INSERT INTO groups (id, name) VALUES (?, ?)", [id, group.name]);
         return { id, ...group };
     },
+    updateGroup: async (group) => {
+        await run("UPDATE groups SET name = ? WHERE id = ?", [group.name, group.id]);
+        return group;
+    },
     deleteGroup: async (id) => {
         await run("DELETE FROM groups WHERE id = ?", [id]);
     },
@@ -988,8 +992,14 @@ module.exports = {
     deleteQuestion: async (id) => {
         await run("DELETE FROM questions WHERE id = ?", [id]);
     },
-    deleteAllQuestions: async () => {
-        await run("DELETE FROM questions");
+    deleteQuestions: async (groupId = undefined) => {
+        if (groupId === 'all' || groupId === undefined) {
+            await run("DELETE FROM questions");
+        } else if (groupId === 'public') {
+            await run("DELETE FROM questions WHERE groupId IS NULL OR groupId = ''");
+        } else {
+            await run("DELETE FROM questions WHERE groupId = ?", [groupId]);
+        }
     },
 
     // ==================== 试卷相关 ====================
@@ -1001,6 +1011,11 @@ module.exports = {
         if (filter.groupId !== undefined) {
             conditions.push("groupId = ?");
             params.push(filter.groupId);
+        }
+
+        if (filter.creatorId !== undefined) {
+            conditions.push("creatorId = ?");
+            params.push(filter.creatorId);
         }
 
         if (conditions.length > 0) {

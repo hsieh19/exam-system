@@ -174,6 +174,14 @@ const Storage = {
     return authFetch(`${API_BASE}/api/groups/${id}`, { method: 'DELETE' });
   },
 
+  updateGroup(group) {
+    return authFetch(`${API_BASE}/api/groups/${group.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(group)
+    }).then(r => r.json());
+  },
+
   // ==================== 专业分类相关 ====================
   getCategories() {
     return authFetch(`${API_BASE}/api/categories`).then(r => r.json());
@@ -232,8 +240,12 @@ const Storage = {
     return authFetch(`${API_BASE}/api/questions/${id}`, { method: 'DELETE' });
   },
 
-  deleteAllQuestions() {
-    return authFetch(`${API_BASE}/api/questions/all`, { method: 'DELETE' });
+  deleteAllQuestions(groupId) {
+    let url = `${API_BASE}/api/questions/all`;
+    if (groupId) {
+      url += `?groupId=${groupId}`;
+    }
+    return authFetch(url, { method: 'DELETE' });
   },
 
   // ==================== 试卷相关 ====================
