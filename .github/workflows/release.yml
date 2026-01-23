@@ -54,6 +54,10 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracting changelog for version $VERSION"
           
+          # 获取发布时间 (北京时间)
+          RELEASE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d-%H-%M')
+          echo "RELEASE_TIME=$RELEASE_TIME" >> $GITHUB_OUTPUT
+          
           # 提取当前版本的更新日志全文 (用于 GitHub Release)
           awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p' CHANGELOG.md > RELEASE_NOTES.md
           
@@ -85,6 +89,7 @@ jobs:
           SECRET: ${{ secrets.FEISHU_SECRET }}
           VERSION: ${{ steps.extract_changelog.outputs.VERSION }}
           SUMMARY: ${{ steps.extract_changelog.outputs.SUMMARY }}
+          RELEASE_TIME: ${{ steps.extract_changelog.outputs.RELEASE_TIME }}
         run: |
           python3 - <<EOF
           import hmac
@@ -107,6 +112,7 @@ jobs:
               secret = os.environ.get('SECRET')
               version = os.environ.get('VERSION')
               summary = os.environ.get('SUMMARY', '')
+              release_time = os.environ.get('RELEASE_TIME', '')
               repo = os.environ.get('GITHUB_REPOSITORY')
               
               if not url or not secret:
@@ -134,7 +140,7 @@ jobs:
                               "tag": "div",
                               "text": {
                                   "tag": "lark_md",
-                                  "content": f"**版本**: v{version}\n**更新内容摘要**:\n{summary}"
+                                  "content": f"**发布时间**: {release_time}\n**版本**: v{version}\n**更新内容摘要**:\n{summary}"
                               }
                           },
                           {
