@@ -49,10 +49,10 @@ jobs:
           # 2. 准备发布目录
           mkdir -p pkg/win pkg/linux pkg/macos
           
-          # 3. 复制文件并重命名为要求格式：项目名称-系统-版本-时间
-          cp dist/exam-system-win.exe "pkg/win/exam-system-windows-x64-v$VERSION-$FILE_TIME.exe"
-          cp dist/exam-system-linux "pkg/linux/exam-system-linux-x64-v$VERSION-$FILE_TIME"
-          cp dist/exam-system-macos "pkg/macos/exam-system-macos-x64-v$VERSION-$FILE_TIME"
+          # 3. 复制文件并重命名为要求格式：项目名称_系统_版本_时间
+          cp dist/exam-system-win.exe "pkg/win/exam-system_windows-x64_v$VERSION_$FILE_TIME.exe"
+          cp dist/exam-system-linux "pkg/linux/exam-system_linux-x64_v$VERSION_$FILE_TIME"
+          cp dist/exam-system-macos "pkg/macos/exam-system_macos-x64_v$VERSION_$FILE_TIME"
           
           # 4. 复制 .env.example 到每个包
           cp .env.example pkg/win/
@@ -60,9 +60,9 @@ jobs:
           cp .env.example pkg/macos/
           
           # 5. 压缩打包
-          cd pkg/win && zip -r "../../exam-system-windows-x64-v$VERSION-$FILE_TIME.zip" . && cd ../..
-          cd pkg/linux && tar -czvf "../../exam-system-linux-x64-v$VERSION-$FILE_TIME.tar.gz" . && cd ../..
-          cd pkg/macos && tar -czvf "../../exam-system-macos-x64-v$VERSION-$FILE_TIME.tar.gz" . && cd ../..
+          cd pkg/win && zip -r "../../exam-system_windows-x64_v$VERSION_$FILE_TIME.zip" . && cd ../..
+          cd pkg/linux && tar -czvf "../../exam-system_linux-x64_v$VERSION_$FILE_TIME.tar.gz" . && cd ../..
+          cd pkg/macos && tar -czvf "../../exam-system_macos-x64_v$VERSION_$FILE_TIME.tar.gz" . && cd ../..
 
       - name: Extract Changelog Summary
         id: extract_changelog
