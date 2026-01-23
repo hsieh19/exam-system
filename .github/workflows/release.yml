@@ -23,18 +23,36 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Extract Version and Time
+        id: vars
+        run: |
+          # 获取版本号 (去掉 v)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          
+          # 获取发布时间 (用于通知显示)
+          RELEASE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
+          echo "RELEASE_TIME=$RELEASE_TIME" >> $GITHUB_OUTPUT
+          
+          # 获取发布时间 (用于文件名，不允许有空格)
+          FILE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d-%H-%M')
+          echo "FILE_TIME=$FILE_TIME" >> $GITHUB_OUTPUT
+
       - name: Build and Package
         run: |
+          VERSION=${{ steps.vars.outputs.VERSION }}
+          FILE_TIME=${{ steps.vars.outputs.FILE_TIME }}
+          
           # 1. 构建二进制文件
           npx pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --out-path dist
           
           # 2. 准备发布目录
           mkdir -p pkg/win pkg/linux pkg/macos
           
-          # 3. 复制文件并重命名为更友好的名称
-          cp dist/exam-system-win.exe pkg/win/exam-system.exe
-          cp dist/exam-system-linux pkg/linux/exam-system
-          cp dist/exam-system-macos pkg/macos/exam-system
+          # 3. 复制文件并重命名为要求格式：项目名称-系统-版本-时间
+          cp dist/exam-system-win.exe "pkg/win/exam-system-windows-x64-v$VERSION-$FILE_TIME.exe"
+          cp dist/exam-system-linux "pkg/linux/exam-system-linux-x64-v$VERSION-$FILE_TIME"
+          cp dist/exam-system-macos "pkg/macos/exam-system-macos-x64-v$VERSION-$FILE_TIME"
           
           # 4. 复制 .env.example 到每个包
           cp .env.example pkg/win/
@@ -42,21 +60,15 @@ jobs:
           cp .env.example pkg/macos/
           
           # 5. 压缩打包
-          cd pkg/win && zip -r ../../exam-system-windows-x64.zip . && cd ../..
-          cd pkg/linux && tar -czvf ../../exam-system-linux-x64.tar.gz . && cd ../..
-          cd pkg/macos && tar -czvf ../../exam-system-macos-x64.tar.gz . && cd ../..
+          cd pkg/win && zip -r "../../exam-system-windows-x64-v$VERSION-$FILE_TIME.zip" . && cd ../..
+          cd pkg/linux && tar -czvf "../../exam-system-linux-x64-v$VERSION-$FILE_TIME.tar.gz" . && cd ../..
+          cd pkg/macos && tar -czvf "../../exam-system-macos-x64-v$VERSION-$FILE_TIME.tar.gz" . && cd ../..
 
-      - name: Extract Changelog
+      - name: Extract Changelog Summary
         id: extract_changelog
         run: |
-          # 获取版本号 (去掉 v)
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=${{ steps.vars.outputs.VERSION }}
           echo "Extracting changelog for version $VERSION"
-          
-          # 获取发布时间 (北京时间)
-          RELEASE_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
-          echo "RELEASE_TIME=$RELEASE_TIME" >> $GITHUB_OUTPUT
           
           # 提取当前版本的更新日志全文 (用于 GitHub Release)
           awk -v ver="[$VERSION]" '/^## / { if (p) { exit }; if ($0 ~ ver) { p=1; next } } p' CHANGELOG.md > RELEASE_NOTES.md
@@ -75,9 +87,8 @@ jobs:
         with:
           body_path: RELEASE_NOTES.md
           files: |
-            exam-system-windows-x64.zip
-            exam-system-linux-x64.tar.gz
-            exam-system-macos-x64.tar.gz
+            exam-system-*.zip
+            exam-system-*.tar.gz
           draft: false
           prerelease: false
         env:
@@ -87,9 +98,9 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
           SECRET: ${{ secrets.FEISHU_SECRET }}
-          VERSION: ${{ steps.extract_changelog.outputs.VERSION }}
+          VERSION: ${{ steps.vars.outputs.VERSION }}
           SUMMARY: ${{ steps.extract_changelog.outputs.SUMMARY }}
-          RELEASE_TIME: ${{ steps.extract_changelog.outputs.RELEASE_TIME }}
+          RELEASE_TIME: ${{ steps.vars.outputs.RELEASE_TIME }}
         run: |
           python3 - <<EOF
           import hmac
