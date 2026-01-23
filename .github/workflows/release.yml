@@ -80,16 +80,93 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 通知飞书群
-        uses: XRSec/feishu-bot-webhook-action@v1
-        with:
-          FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          FEISHU_BOT_SIGNKEY: ${{ secrets.FEISHU_SECRET }}
-          MSG_TYPE: "markdown"
-          TITLE: "考试系统版本更新通知"
-          CONTENT: |
-            **版本**: v${{ steps.extract_changelog.outputs.VERSION }}
-            **更新内容**:
-            ${{ steps.extract_changelog.outputs.SUMMARY }}
-            
-            ---
-            [查看完整更新日志](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.extract_changelog.outputs.VERSION }})
+        env:
+          WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
+          SECRET: ${{ secrets.FEISHU_SECRET }}
+          VERSION: ${{ steps.extract_changelog.outputs.VERSION }}
+          SUMMARY: ${{ steps.extract_changelog.outputs.SUMMARY }}
+        run: |
+          python3 - <<EOF
+          import hmac
+          import hashlib
+          import base64
+          import time
+          import json
+          import urllib.request
+          import os
+          import sys
+
+          def gen_sign(secret, timestamp):
+              string_to_sign = '{}\n{}'.format(timestamp, secret)
+              hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+              sign = base64.b64encode(hmac_code).decode('utf-8')
+              return sign
+
+          def send():
+              url = os.environ.get('WEBHOOK_URL')
+              secret = os.environ.get('SECRET')
+              version = os.environ.get('VERSION')
+              summary = os.environ.get('SUMMARY', '')
+              repo = os.environ.get('GITHUB_REPOSITORY')
+              
+              if not url or not secret:
+                  print("Error: Missing WEBHOOK_URL or SECRET")
+                  sys.exit(1)
+              
+              timestamp = str(int(time.time()))
+              sign = gen_sign(secret, timestamp)
+              
+              # 构建精美的飞书消息卡片
+              payload = {
+                  "timestamp": timestamp,
+                  "sign": sign,
+                  "msg_type": "interactive",
+                  "card": {
+                      "header": {
+                          "title": {
+                              "tag": "plain_text",
+                              "content": "考试系统版本更新通知"
+                          },
+                          "template": "blue"
+                      },
+                      "elements": [
+                          {
+                              "tag": "div",
+                              "text": {
+                                  "tag": "lark_md",
+                                  "content": f"**版本**: v{version}\n**更新内容摘要**:\n{summary}"
+                              }
+                          },
+                          {
+                              "tag": "hr"
+                          },
+                          {
+                              "tag": "action",
+                              "actions": [
+                                  {
+                                      "tag": "button",
+                                      "text": {
+                                          "tag": "plain_text",
+                                          "content": "查看完整日志"
+                                      },
+                                      "type": "primary",
+                                      "url": f"https://github.com/{repo}/releases/tag/v{version}"
+                                  }
+                              ]
+                          }
+                      ]
+                  }
+              }
+              
+              req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
+              try:
+                  with urllib.request.urlopen(req) as f:
+                      res = f.read().decode('utf-8')
+                      print(f"Response: {res}")
+              except Exception as e:
+                  print(f"Error sending message: {e}")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              send()
+          EOF
