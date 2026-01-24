@@ -10,6 +10,7 @@ const execMode = instances === 1 ? 'fork' : 'cluster';
 module.exports = {
     apps: [{
         name: 'exam-system',
+        cwd: path.resolve(__dirname),
         script: 'src/server.js',
         instances,
         exec_mode: execMode,
@@ -25,8 +26,8 @@ module.exports = {
             PORT: process.env.PORT || 3000
         },
         // Log files
-        error_file: 'logs/err.log',
-        out_file: 'logs/out.log',
+        error_file: 'pm2-err.log',
+        out_file: 'pm2-out.log',
         merge_logs: true,
         time: true
     }]
