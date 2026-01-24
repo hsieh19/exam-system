@@ -197,19 +197,14 @@ const sqliteAdapter = {
         checkAndAddColumn('users', 'feishuEnabled', 'INTEGER DEFAULT 1');
         checkAndAddColumn('exam_sessions', 'lastQuestionStartTime', 'TEXT');
 
-        // 确保有管理员账号
+        // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
-
-        const admin = this.db.exec("SELECT * FROM users WHERE username = ?", [adminUsername]);
-        // 只有当查询结果为空，或者虽然有结果但values为空数组时，才插入
-        if (!admin.length || !admin[0].values.length) {
+        const countRow = this.query("SELECT COUNT(1) AS cnt FROM users")[0];
+        const userCount = Number(countRow?.cnt || 0);
+        if (userCount === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
-            // 检查如果不只有admin一个用户，应该生成新的ID，还是固定ID？
-            // 原逻辑是固定 'admin-001'，为了兼容性暂时保持，但如果adminUsername变了，ID也最好保持唯一或是特定。
-            // 这里我们保持 'admin-001' 作为初始超管的ID，以此标识它是系统初始化的
-            // 默认管理员不受首次登录需更改密码的限制
             this.db.run("INSERT INTO users (id, username, password, role, isFirstLogin) VALUES (?, ?, ?, ?, ?)",
                 ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]);
         }
@@ -448,15 +443,15 @@ const mysqlAdapter = {
             console.error('MySQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
         }
 
-        // 确保有管理员账号
+        // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        const [rows] = await this.pool.execute("SELECT * FROM users WHERE username = ?", [adminUsername]);
-        if (rows.length === 0) {
+        const [countRows] = await this.pool.execute("SELECT COUNT(1) AS cnt FROM users");
+        const userCount = Number(countRows?.[0]?.cnt || 0);
+        if (userCount === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
-            // 默认管理员不受首次登录需更改密码的限制
             await this.pool.execute(
                 "INSERT INTO users (id, username, password, role, isFirstLogin) VALUES (?, ?, ?, ?, ?)",
                 ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]
@@ -686,15 +681,15 @@ const postgresAdapter = {
             console.error('PostgreSQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
         }
 
-        // 确保有管理员账号
+        // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        const result = await this.pool.query("SELECT * FROM users WHERE username = $1", [adminUsername]);
-        if (result.rows.length === 0) {
+        const countResult = await this.pool.query("SELECT COUNT(1) AS cnt FROM users");
+        const userCount = Number(countResult.rows?.[0]?.cnt || 0);
+        if (userCount === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
-            // 默认管理员不受首次登录需更改密码的限制
             await this.pool.query(
                 "INSERT INTO users (id, username, password, role, isFirstLogin) VALUES ($1, $2, $3, $4, $5)",
                 ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]

@@ -306,6 +306,14 @@ module.exports = function initRoutes(app, context) {
         if (targetUser.role === 'super_admin' && req.user.role !== 'super_admin') {
             return res.status(403).json({ error: '无权删除超级管理员' });
         }
+        // 2.1 不能删除最后一个超级管理员（防止系统无人可管）
+        if (targetUser.role === 'super_admin' && req.user.role === 'super_admin') {
+            const allUsers = await db.getUsers();
+            const superAdminCount = allUsers.filter(u => u.role === 'super_admin').length;
+            if (superAdminCount <= 1) {
+                return res.status(403).json({ error: '不能删除最后一个超级管理员' });
+            }
+        }
         // 3. 非超管只能删除本组成员
         if (req.user.role !== 'super_admin' && targetUser.groupId !== req.user.groupId) {
             return res.status(403).json({ error: '无权操作该用户' });

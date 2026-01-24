@@ -2,13 +2,17 @@ const path = require('path');
 require('dotenv').config();
 
 const useRedis = process.env.USE_REDIS === 'true';
+const dbType = (process.env.DB_TYPE || 'sqlite').toLowerCase();
+const shouldCluster = useRedis && dbType !== 'sqlite';
+const instances = shouldCluster ? 'max' : 1;
+const execMode = instances === 1 ? 'fork' : 'cluster';
 
 module.exports = {
     apps: [{
         name: 'exam-system',
         script: 'src/server.js',
-        instances: useRedis ? 'max' : 1,
-        exec_mode: 'cluster',
+        instances,
+        exec_mode: execMode,
         autorestart: true,
         watch: false,
         max_memory_restart: '1G',
