@@ -73,8 +73,16 @@ const Auth = {
     },
 
     // 登出
-    logout() {
-        Storage.logout();
+    async logout() {
+        try {
+            if (Storage.logoutRemote) {
+                await Storage.logoutRemote();
+            } else {
+                Storage.logout();
+            }
+        } catch (e) {
+            Storage.logout();
+        }
         window.location.href = 'index.html';
     },
 
@@ -84,7 +92,8 @@ const Auth = {
         const container = document.getElementById(containerId);
         if (!container || !user) return;
 
-        const avatar = user.username.charAt(0).toUpperCase();
+        const safeUsername = escapeHtml(user.username || '');
+        const avatar = safeUsername.charAt(0).toUpperCase();
         let roleText = '考生';
         if (user.role === 'super_admin') roleText = '超级管理员';
         else if (user.role === 'group_admin') roleText = '分组管理员';
@@ -92,7 +101,7 @@ const Auth = {
         container.innerHTML = `
       <div class="user-avatar">${avatar}</div>
       <div class="user-details">
-        <div class="user-name">${user.username}</div>
+        <div class="user-name">${safeUsername}</div>
         <div class="user-role">${roleText}</div>
       </div>
       <div class="logout-btn" onclick="Auth.logout()" title="退出登录">

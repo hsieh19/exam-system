@@ -10,7 +10,21 @@ function escapeHtml(str) {
     if (str === null || str === undefined) return '';
     const div = document.createElement('div');
     div.textContent = str;
-    return div.innerHTML;
+    return div.innerHTML
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeJsString(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
 }
 
 /**
@@ -37,6 +51,7 @@ function formatFullDateTime(dateVal) {
 
 window.params = {};
 window.escapeHtml = escapeHtml;
+window.escapeJsString = escapeJsString;
 window.formatFullDateTime = formatFullDateTime;
 
 /**
@@ -62,6 +77,31 @@ function formatDuration(seconds, useChinese = false) {
 }
 
 window.formatDuration = formatDuration;
+
+/**
+ * 安全的内联事件处理器
+ * 从 data- 属性中读取参数，避免在 HTML 字符串中直接插值
+ * @param {HTMLElement} el 触发事件的元素
+ * @param {string} fnName 全局函数名称
+ * @param {string[]} dataKeys 需要从 dataset 中提取的 key 列表
+ */
+function safeOnclick(el, fnName, dataKeys = []) {
+    const fn = window[fnName];
+    if (typeof fn !== 'function') {
+        console.error(`[safeOnclick] Function ${fnName} not found`);
+        return;
+    }
+    const dataset = el && el.dataset ? el.dataset : {};
+    const args = dataKeys.map(key => dataset[key]);
+    const finalArgs = fn.length > args.length ? [el, ...args] : args;
+    try {
+        fn.apply(el, finalArgs);
+    } catch (e) {
+        console.error(`[safeOnclick] Error calling ${fnName}:`, e);
+    }
+}
+
+window.safeOnclick = safeOnclick;
 
 // 全局 Alert 组件
 let alertCallback = null;

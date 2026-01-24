@@ -158,15 +158,15 @@ function showQuestion(customTime = null) {
 
     if (q.type === 'judge') {
         optionsHtml = `
-      <div class="option-item" data-value="A" onclick="selectOption(this, ${isMultiple})">
+      <div class="option-item" data-value="A" data-multiple="${isMultiple}" onclick="safeOnclick(this, 'selectOption', ['multiple'])">
         <span class="option-marker">A</span><span class="option-text">正确</span>
       </div>
-      <div class="option-item" data-value="B" onclick="selectOption(this, ${isMultiple})">
+      <div class="option-item" data-value="B" data-multiple="${isMultiple}" onclick="safeOnclick(this, 'selectOption', ['multiple'])">
         <span class="option-marker">B</span><span class="option-text">错误</span>
       </div>`;
     } else {
         optionsHtml = q.options.map((opt, i) => `
-      <div class="option-item" data-value="${'ABCDEFGH'[i]}" onclick="selectOption(this, ${isMultiple})">
+      <div class="option-item" data-value="${'ABCDEFGH'[i]}" data-multiple="${isMultiple}" onclick="safeOnclick(this, 'selectOption', ['multiple'])">
         <span class="option-marker">${'ABCDEFGH'[i]}</span><span class="option-text">${escapeHtml(opt)}</span>
       </div>`).join('');
     }
@@ -200,7 +200,9 @@ function startQuestionTimer(seconds) {
 }
 
 function selectOption(el, isMultiple) {
-    if (isMultiple) {
+    // 处理 data-multiple 属性传过来的字符串 "true"/"false"
+    const multiple = isMultiple === 'true' || isMultiple === true;
+    if (multiple) {
         el.classList.toggle('selected');
     } else {
         document.querySelectorAll('.option-item').forEach(o => o.classList.remove('selected'));

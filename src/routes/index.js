@@ -9,9 +9,73 @@ const feishuService = require('../utils/feishu');
 
 // Session 配置
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24小时过期
+const TOKEN_REGEX = /^[a-f0-9]{64}$/i;
+
+const parseBearerToken = (authHeader) => {
+    if (!authHeader || typeof authHeader !== 'string') return null;
+    if (!authHeader.toLowerCase().startsWith('bearer ')) return null;
+    const token = authHeader.slice(7).trim();
+    if (!TOKEN_REGEX.test(token)) return null;
+    return token;
+};
+
+const createRateLimiter = ({ windowMs, max, keyFn }) => {
+    const buckets = new Map();
+    const ttlMs = windowMs;
+
+    const cleanup = () => {
+        const now = Date.now();
+        for (const [key, bucket] of buckets.entries()) {
+            if (!bucket || bucket.resetAt <= now) buckets.delete(key);
+        }
+    };
+
+    return (req, res, next) => {
+        cleanup();
+        const key = keyFn(req);
+        if (!key) return next();
+
+        const now = Date.now();
+        const bucket = buckets.get(key) || { count: 0, resetAt: now + ttlMs };
+        if (bucket.resetAt <= now) {
+            bucket.count = 0;
+            bucket.resetAt = now + ttlMs;
+        }
+
+        bucket.count += 1;
+        buckets.set(key, bucket);
+
+        if (bucket.count > max) {
+            res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
+            return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+        }
+
+        next();
+    };
+};
 
 module.exports = function initRoutes(app, context) {
     const { sessionStore, sseClients, broadcast, upload } = context;
+    const loginLimiter = createRateLimiter({
+        windowMs: Number(process.env.LOGIN_RATE_WINDOW_MS || 5 * 60 * 1000),
+        max: Number(process.env.LOGIN_RATE_MAX || 30),
+        keyFn: (req) => `login:${getClientIp(req)}`
+    });
+    const feishuLoginLimiter = createRateLimiter({
+        windowMs: Number(process.env.FEISHU_LOGIN_RATE_WINDOW_MS || 5 * 60 * 1000),
+        max: Number(process.env.FEISHU_LOGIN_RATE_MAX || 60),
+        keyFn: (req) => `feishu_login:${getClientIp(req)}`
+    });
+    const sseLimiter = createRateLimiter({
+        windowMs: Number(process.env.SSE_RATE_WINDOW_MS || 60 * 1000),
+        max: Number(process.env.SSE_RATE_MAX || 10),
+        keyFn: (req) => `sse:${getClientIp(req)}`
+    });
+    const dbImportLimiter = createRateLimiter({
+        windowMs: Number(process.env.DB_IMPORT_RATE_WINDOW_MS || 10 * 60 * 1000),
+        max: Number(process.env.DB_IMPORT_RATE_MAX || 3),
+        keyFn: (req) => `db_import:${getClientIp(req)}`
+    });
 
     // ==================== 认证中间件 ====================
     const authMiddleware = async (req, res, next) => {
@@ -19,10 +83,8 @@ module.exports = function initRoutes(app, context) {
         const whiteList = ['/login', '/feishu/login', '/feishu/config'];
         if (whiteList.includes(req.path)) return next();
 
-        const authHeader = req.headers['authorization'];
-        if (!authHeader) return res.status(401).json({ error: '未登录或登录已过期' });
-
-        const token = authHeader.split(' ')[1];
+        const token = parseBearerToken(req.headers['authorization']);
+        if (!token) return res.status(401).json({ error: '未登录或登录已过期' });
 
         try {
             const session = await sessionStore.get(token);
@@ -73,18 +135,40 @@ module.exports = function initRoutes(app, context) {
     const adminMiddleware = roleMiddleware(['super_admin', 'group_admin']);
     const superAdminMiddleware = roleMiddleware(['super_admin']);
 
-    app.get('/events', async (req, res) => {
-        const token = req.query.token;
+    const closeSseForUser = (userId) => {
+        if (!userId) return;
+        for (const res of sseClients) {
+            if (!res) continue;
+            if (res.__userId !== userId) continue;
+            try {
+                res.end();
+            } catch (e) {
+            }
+            sseClients.delete(res);
+        }
+    };
+
+    app.get('/events', sseLimiter, async (req, res) => {
+        const tokenFromHeader = parseBearerToken(req.headers['authorization']);
+        const tokenFromQuery = typeof req.query.token === 'string' && TOKEN_REGEX.test(req.query.token) ? req.query.token : null;
+        const token = tokenFromHeader || tokenFromQuery;
+        if (!token) return res.status(401).end();
         try {
             const session = await sessionStore.get(token);
-            if (!token || !session) return res.status(401).end();
+            if (!session) return res.status(401).end();
             const currentToken = await sessionStore.getUserToken(session.user.id);
-            if (currentToken && currentToken !== token) return res.status(401).end();
+            if (currentToken && currentToken !== token) {
+                await sessionStore.delete(token);
+                return res.status(401).end();
+            }
             res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
             if (res.flushHeaders) res.flushHeaders();
             res.write('retry: 5000\n\n');
+            res.__userId = session.user.id;
+            res.__token = token;
             sseClients.add(res);
             req.on('close', () => {
                 sseClients.delete(res);
@@ -157,7 +241,7 @@ module.exports = function initRoutes(app, context) {
         res.send(Buffer.from(data));
     });
 
-    app.post('/api/db/import', adminMiddleware, upload.single('file'), async (req, res) => {
+    app.post('/api/db/import', adminMiddleware, dbImportLimiter, upload.single('file'), async (req, res) => {
         if (db.getActiveDbType() !== 'sqlite') {
             return res.status(400).json({ error: '只有 SQLite 数据库支持导入' });
         }
@@ -201,7 +285,7 @@ module.exports = function initRoutes(app, context) {
             userData.role = 'student';
             userData.groupId = req.user.groupId;
         }
-        const user = { id: generateId('u_'), ...userData };
+        const user = { ...userData, id: generateId('u_') };
         const result = await db.addUser(user);
         // 记录日志
         await logAction('创建用户', 'user', user.id, req.user, { username: userData.username, role: userData.role }, getClientIp(req));
@@ -304,6 +388,26 @@ module.exports = function initRoutes(app, context) {
         }
     });
 
+    app.post('/api/logout', async (req, res) => {
+        const token = req.token;
+        const userId = req.user?.id;
+        try {
+            if (token) await sessionStore.delete(token);
+            if (userId) {
+                const currentToken = await sessionStore.getUserToken(userId);
+                if (currentToken && currentToken === token) {
+                    await sessionStore.deleteUserToken(userId);
+                }
+                closeSseForUser(userId);
+                await logAction('退出登录', 'user', userId, req.user, {}, getClientIp(req));
+            }
+            res.json({ success: true });
+        } catch (e) {
+            console.error('Logout error:', e);
+            res.status(500).json({ error: '退出登录失败' });
+        }
+    });
+
     // ==================== 飞书集成接口 ====================
     app.get('/api/feishu/config', (req, res) => {
         res.json({
@@ -312,7 +416,7 @@ module.exports = function initRoutes(app, context) {
         });
     });
 
-    app.post('/api/feishu/login', async (req, res) => {
+    app.post('/api/feishu/login', feishuLoginLimiter, async (req, res) => {
         const { code } = req.body;
         const clientIp = getClientIp(req);
 
@@ -398,6 +502,8 @@ module.exports = function initRoutes(app, context) {
             // 5. 生成 Session
             const existingToken = await sessionStore.getUserToken(user.id);
             if (existingToken) {
+                await sessionStore.delete(existingToken);
+                closeSseForUser(user.id);
                 await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
             }
             const token = generateSecureToken();
@@ -414,7 +520,7 @@ module.exports = function initRoutes(app, context) {
         }
     });
 
-    app.post('/api/login', async (req, res) => {
+    app.post('/api/login', loginLimiter, async (req, res) => {
         const { username, password } = req.body;
         const clientIp = getClientIp(req);
         const user = await db.login(username, password);
@@ -422,6 +528,8 @@ module.exports = function initRoutes(app, context) {
             // 生成安全 Token
             const existingToken = await sessionStore.getUserToken(user.id);
             if (existingToken) {
+                await sessionStore.delete(existingToken);
+                closeSseForUser(user.id);
                 await logAction('账号异地登录踢下线', 'user', user.id, user, { username }, clientIp);
             }
             const token = generateSecureToken();
@@ -460,12 +568,12 @@ module.exports = function initRoutes(app, context) {
     });
 
     // ==================== 分组接口 ====================
-    app.get('/api/groups', async (req, res) => {
+    app.get('/api/groups', adminMiddleware, async (req, res) => {
         res.json(await db.getGroups());
     });
 
     app.post('/api/groups', superAdminMiddleware, async (req, res) => {
-        const group = { id: generateId('g_'), ...req.body };
+        const group = { ...(req.body || {}), id: generateId('g_') };
         const result = await db.addGroup(group);
         res.json(result);
         broadcast('db_change', { resource: 'groups' });
@@ -505,7 +613,7 @@ module.exports = function initRoutes(app, context) {
         if (req.user.role !== 'super_admin') {
             questionData.groupId = req.user.groupId;
         }
-        const question = { id: generateId('q_'), ...questionData };
+        const question = { ...questionData, id: generateId('q_') };
         const result = await db.addQuestion(question);
         // 记录日志
         await logAction('创建题目', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
@@ -567,20 +675,20 @@ module.exports = function initRoutes(app, context) {
     });
 
     // ==================== 专业分类接口 ====================
-    app.get('/api/categories', async (req, res) => {
+    app.get('/api/categories', adminMiddleware, async (req, res) => {
         res.json(await db.getCategories());
     });
 
-    app.get('/api/categories/majors', async (req, res) => {
+    app.get('/api/categories/majors', adminMiddleware, async (req, res) => {
         res.json(await db.getMajors());
     });
 
-    app.get('/api/categories/devices/:majorId', async (req, res) => {
+    app.get('/api/categories/devices/:majorId', adminMiddleware, async (req, res) => {
         res.json(await db.getDeviceTypes(req.params.majorId));
     });
 
     app.post('/api/categories', superAdminMiddleware, async (req, res) => {
-        const cat = { id: generateId('cat_'), ...req.body };
+        const cat = { ...(req.body || {}), id: generateId('cat_') };
         const result = await db.addCategory(cat);
         res.json(result);
         broadcast('db_change', { resource: 'categories' });
@@ -611,7 +719,7 @@ module.exports = function initRoutes(app, context) {
             }
 
             // 对于分组管理员，返回本组创建的试卷
-            if (user.role === 'admin') {
+            if (user.role === 'group_admin') {
                 return res.json(papers.filter(p => p.groupId === user.groupId));
             }
 
@@ -651,12 +759,13 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.post('/api/papers', adminMiddleware, async (req, res) => {
+        const body = req.body || {};
         const paper = {
+            ...body,
             id: generateId('p_'),
             createDate: new Date().toISOString().split('T')[0],
             creatorId: req.user.id,
             groupId: req.user.groupId,
-            ...req.body
         };
         // 分组管理员强制创建本组试卷
         if (req.user.role !== 'super_admin') {
@@ -771,8 +880,17 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.get('/api/papers/user/:userId', async (req, res) => {
-        const user = await db.getUserById(req.params.userId);
+        const requestedUserId = req.params.userId;
+        const requester = req.user;
+        const user = await db.getUserById(requestedUserId);
         if (!user) return res.json([]);
+
+        if (requester.role === 'student' && user.id !== requester.id) {
+            return res.status(403).json({ error: '无权访问' });
+        }
+        if (requester.role === 'group_admin' && requester.groupId && user.groupId !== requester.groupId) {
+            return res.status(403).json({ error: '无权访问' });
+        }
 
         const papers = await db.getPapers();
         const availablePromises = papers.map(async p => {
@@ -869,7 +987,7 @@ module.exports = function initRoutes(app, context) {
             const session = await db.getExamSession(user.id, paper.id);
             if (!session) return res.status(400).json({ error: '考试会话不存在或已结束，请重新进入考试后提交' });
 
-            const record = { id: generateId('r_'), ...req.body, userId };
+            const record = { ...(req.body || {}), id: generateId('r_'), userId };
             const result = await db.addRecord(record);
 
             await db.deleteExamSession(userId, paper.id);
@@ -882,14 +1000,31 @@ module.exports = function initRoutes(app, context) {
 
     app.get('/api/ranking/:paperId', async (req, res) => {
         const paperId = req.params.paperId;
+        const requester = req.user;
+        const paper = await db.getPaperById(paperId);
+        if (!paper || !paper.published) return res.status(404).json({ error: '试卷不存在或未发布' });
+
+        if (requester.role !== 'super_admin') {
+            const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
+            const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
+            const inGroup = requester.groupId ? targetGroups.includes(requester.groupId) : false;
+            const inUsers = targetUsers.includes(requester.id);
+
+            if (requester.role === 'group_admin') {
+                const canSee = paper.creatorId === requester.id || inGroup || inUsers;
+                if (!canSee) return res.status(403).json({ error: '无权查看排行榜' });
+            } else {
+                if (!inGroup && !inUsers) return res.status(403).json({ error: '无权查看排行榜' });
+            }
+        }
+
         const records = await db.getRecordsByPaper(paperId);
         const users = await db.getUsers();
-        const paper = await db.getPaperById(paperId);
 
         // 计算该试卷总共推送给了多少人
         let totalAssigned = 0;
         if (paper && paper.targetGroups && paper.targetGroups.length > 0) {
-            totalAssigned = users.filter(u => paper.targetGroups.includes(u.groupId)).length;
+            totalAssigned = users.filter(u => u.role === 'student' && paper.targetGroups.includes(u.groupId)).length;
         } else if (paper && paper.published) {
             // 如果已发布但没有目标组（可能逻辑上不应该，但作为保底），或者是全员推送
             totalAssigned = users.filter(u => u.role === 'student').length;

@@ -155,33 +155,56 @@
           } catch (_) { }
           resolve();
         });
-        const hasRequestAuthCode = () => {
-          try {
-            return !!(window.tt && typeof window.tt.requestAuthCode === 'function');
-          } catch (_) {
-            return false;
-          }
+        const getAuthApi = () => {
+          const candidates = [
+            window.tt,
+            window.lark,
+            window.feishu,
+            window.h5sdk && window.h5sdk.tt
+          ].filter(Boolean);
+          return candidates.find(api => api && typeof api.requestAuthCode === 'function') || null;
         };
-        const waitForRequestAuthCode = (timeoutMs = 2000) => new Promise((resolve) => {
+
+        const requestAuthCode = (timeoutMs = 8000) => new Promise((resolve, reject) => {
           const start = Date.now();
-          const tick = () => {
-            if (hasRequestAuthCode()) return resolve(true);
-            if (Date.now() - start >= timeoutMs) return resolve(false);
-            setTimeout(tick, 50);
+          let done = false;
+          const finish = (fn) => {
+            if (done) return;
+            done = true;
+            fn();
           };
-          tick();
-        });
-        const requestAuthCode = () => new Promise((resolve, reject) => {
-          const api = window.tt;
-          if (!api || typeof api.requestAuthCode !== 'function') {
-            reject(new Error('飞书 JSSDK 未就绪（tt.requestAuthCode 不可用）'));
-            return;
+
+          const tryCall = () => {
+            const api = getAuthApi();
+            if (api && typeof api.requestAuthCode === 'function') {
+              try {
+                api.requestAuthCode({
+                  appId: feishuConfig.appId,
+                  success: (res) => finish(() => resolve(res && res.code)),
+                  fail: (err) => finish(() => reject(new Error(typeof err === 'string' ? err : JSON.stringify(err))))
+                });
+              } catch (e) {
+                finish(() => reject(e));
+              }
+              return;
+            }
+
+            if (Date.now() - start >= timeoutMs) {
+              finish(() => reject(new Error('飞书 JSSDK 未就绪（requestAuthCode 不可用）')));
+              return;
+            }
+            setTimeout(tryCall, 50);
+          };
+
+          try {
+            if (window.h5sdk && typeof window.h5sdk.ready === 'function') {
+              window.h5sdk.ready(() => tryCall());
+            } else {
+              tryCall();
+            }
+          } catch (e) {
+            reject(e);
           }
-          api.requestAuthCode({
-            appId: feishuConfig.appId,
-            success: (res) => resolve(res && res.code),
-            fail: (err) => reject(new Error(typeof err === 'string' ? err : JSON.stringify(err)))
-          });
         });
         
         const handleFeishuLogin = async (code) => {
@@ -218,25 +241,24 @@
             setStatus('飞书免登录：初始化中…');
             await loadSdk();
             await waitSdkReady();
-            const canRequestAuthCode = hasRequestAuthCode() || await waitForRequestAuthCode(5000);
-
-            if (!canRequestAuthCode) {
-              setStatus('飞书免登录：授权组件未就绪，请点击飞书图标重试');
+            console.log('Detect Feishu environment, attempting silent login...');
+            setStatus('飞书免登录：正在尝试…');
+            const code = await requestAuthCode(8000);
+            if (code) {
+              setStatus('');
+              console.log('Got Feishu auth code silently');
+              handleFeishuLogin(code);
             } else {
-              console.log('Detect Feishu environment, attempting silent login...');
-              setStatus('飞书免登录：正在尝试…');
-              const code = await requestAuthCode();
-              if (code) {
-                setStatus('');
-                console.log('Got Feishu auth code silently');
-                handleFeishuLogin(code);
-              } else {
-                setStatus('飞书免登录：未获取到授权码，请点击飞书图标重试');
-              }
+              setStatus('飞书免登录：未获取到授权码，请点击飞书图标重试');
             }
           } catch (err) {
             console.error('Feishu silent auth failed', err);
-            setStatus('飞书免登录失败：' + (err && err.message ? err.message : String(err)));
+            const msg = err && err.message ? err.message : String(err);
+            if (/未就绪|requestAuthCode/i.test(msg)) {
+              setStatus('飞书免登录：授权组件未就绪，请点击飞书图标重试');
+            } else {
+              setStatus('飞书免登录失败：' + msg);
+            }
           }
         }
 
@@ -246,14 +268,13 @@
             try {
               setStatus('正在初始化飞书组件…');
               await loadSdk();
-              if (window.tt && window.tt.requestAuthCode) {
+              if (isFeishuUA) {
                 setStatus('正在获取飞书授权码…');
                 await waitSdkReady();
-                const code = await requestAuthCode();
+                const code = await requestAuthCode(8000);
                 setStatus('');
                 handleFeishuLogin(code);
               } else {
-                // 如果不在飞书环境，跳转到扫码登录
                 setStatus('');
                 const redirectUri = encodeURIComponent(feishuConfig.redirectUri || window.location.href);
                 const appId = feishuConfig.appId;

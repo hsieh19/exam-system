@@ -96,130 +96,136 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# 检查 PM2 是否安装
+is_pm2_installed() {
+    command_exists pm2
+}
+
+# 检查应用是否在 PM2 中运行
+is_app_in_pm2() {
+    if is_pm2_installed; then
+        pm2 list | grep -q "exam-system"
+        return $?
+    fi
+    return 1
+}
+
 # -------------------------------------------------------
 # 环境管理功能
 # -------------------------------------------------------
 
-install_redis() {
-    echo -e "${BLUE}>>> 检查 Redis 环境...${NC}"
+install_redis_pm2() {
+    echo -e "${BLUE}>>> 检查运行环境 (Redis & PM2)...${NC}"
 
     # 0. 检查 OS
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS_NAME=$ID
     else
-        echo -e "${RED}无法检测操作系统版本${NC}"
-        return 1
-    fi
-
-    # Windows 环境检测
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OS_NAME" == "" ]]; then
-        echo -e "${YELLOW}提示: 检测到当前可能为 Windows 环境或非标准 Linux 环境。${NC}"
-        echo -e "Windows 用户请手动安装 Redis 或使用 Docker Desktop。"
-        echo -e "推荐安装 Redis for Windows: https://github.com/tporadowski/redis/releases"
-        return 0
-    fi
-    
-    # 风险提示
-    echo -e "${YELLOW}⚠️  警告: 切换到 Redis 存储模式后，需要重启服务。${NC}"
-    echo -e "${YELLOW}      重启服务将导致【当前所有在线用户】强制登出。${NC}"
-    read -p "是否继续? (y/n): " confirm_install
-    if [[ "$confirm_install" != "y" ]]; then
-        echo "操作已取消"
-        return 0
-    fi
-
-    # 1. 检查 Redis 是否已安装
-    if command_exists redis-server; then
-        echo -e "${GREEN}Redis 已安装: $(redis-server --version | head -n 1)${NC}"
-    else
-        echo -e "${YELLOW}未检测到 Redis，准备自动安装...${NC}"
-        if [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "debian" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y redis-server
-        elif [[ "$OS_NAME" == "centos" ]] || [[ "$OS_NAME" == "rhel" ]]; then
-            # CentOS 需要 EPEL 源
-            if ! rpm -qa | grep -q epel-release; then
-                sudo yum install -y epel-release
-            fi
-            sudo yum install -y redis
+        # Windows 环境检测
+        if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+             OS_NAME="windows"
         else
-            echo -e "${RED}不支持的自动安装系统: $OS_NAME，请手动安装 Redis${NC}"
-            return 1
-        fi
-    fi
-
-    # 2. 启动服务 & 健康检查
-    echo -e "${BLUE}>>> 正在启动 Redis 服务...${NC}"
-    if command_exists systemctl; then
-        # 使用 redis-server 以避免别名问题，并吞掉 enable 可能产生的非致命警告
-        sudo systemctl enable redis-server >/dev/null 2>&1 || sudo systemctl enable redis >/dev/null 2>&1
-        sudo systemctl start redis-server || sudo systemctl start redis
-    else
-        redis-server --daemonize yes
-    fi
-    
-    # 等待几秒让服务启动
-    sleep 2
-    
-    # 关键：检查 Redis 是否真的活着
-    echo "正在检查 Redis 连接..."
-    if ! command_exists redis-cli; then
-        # 尝试安装 redis-tools (如果 redis-server 安装了但没有 cli)
-        if [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "debian" ]]; then
-            sudo apt-get install -y redis-tools
-        fi
-    fi
-
-    if command_exists redis-cli; then
-        if redis-cli ping | grep -q "PONG"; then
-             echo -e "${GREEN}Redis 连接测试通过 (PONG)${NC}"
-        else
-             echo -e "${RED}错误: Redis 服务启动失败或无法连接。${NC}"
-             echo -e "${RED}为了保护系统稳定性，将中止配置修改。请检查 Redis 日志。${NC}"
+             echo -e "${RED}无法检测操作系统版本${NC}"
              return 1
         fi
-    else
-        echo -e "${YELLOW}警告: 未找到 redis-cli，跳过连接测试 (假设安装成功)${NC}"
     fi
 
-    # 3. 修改项目配置 (.env)
-    echo -e "${BLUE}>>> 正在配置项目环境变量...${NC}"
-    ENV_FILE=".env"
-    if [ ! -f "$ENV_FILE" ]; then
-        if [ -f ".env.example" ]; then
-            cp .env.example .env
-        else
-            echo -e "${RED}错误: 未找到 .env 或 .env.example 文件${NC}"
+    # 1. PM2 安装与检查
+    echo -e "${BLUE}>>> 检查 PM2 环境...${NC}"
+    if is_pm2_installed; then
+        echo -e "${GREEN}PM2 已安装: $(pm2 -v)${NC}"
+    else
+        echo -e "${YELLOW}未检测到 PM2，准备自动安装...${NC}"
+        if ! command_exists npm; then
+            echo -e "${RED}错误: 未检测到 npm，请先执行菜单 6 安装基础环境${NC}"
             return 1
         fi
-    fi
-
-    # 备份
-    cp "$ENV_FILE" "${ENV_FILE}.bak_$(date +%Y%m%d%H%M%S)"
-    
-    # 智能更新配置
-    # 1. 处理 USE_REDIS
-    if grep -q "USE_REDIS=" "$ENV_FILE"; then
-        # 存在则替换
-        if echo "$OSTYPE" | grep -q "darwin"; then
-            sed -i '' 's/USE_REDIS=.*/USE_REDIS=true/g' "$ENV_FILE"
+        
+        echo "正在全局安装 pm2..."
+        npm install -g pm2 --registry=https://registry.npmmirror.com
+        
+        if is_pm2_installed; then
+            echo -e "${GREEN}PM2 安装成功!${NC}"
         else
-            sed -i 's/USE_REDIS=.*/USE_REDIS=true/g' "$ENV_FILE"
+            echo -e "${RED}PM2 安装失败，请尝试手动运行: npm install -g pm2${NC}"
+            # 即使 PM2 失败，也可以继续尝试安装 Redis
         fi
+    fi
+
+    # 2. Redis 安装与检查
+    echo -e "${BLUE}>>> 检查 Redis 环境...${NC}"
+    if [[ "$OS_NAME" == "windows" ]]; then
+        echo -e "${YELLOW}提示: 检测到当前为 Windows 环境。${NC}"
+        echo -e "Windows 用户请手动安装 Redis 或使用 Docker Desktop。"
+        echo -e "推荐安装 Redis for Windows: https://github.com/tporadowski/redis/releases"
     else
-        # 不存在则追加
-        echo "USE_REDIS=true" >> "$ENV_FILE"
+        # 风险提示 (仅 Linux)
+        echo -e "${YELLOW}⚠️  警告: 切换到 Redis 存储模式后，需要重启服务。${NC}"
+        echo -e "${YELLOW}      重启服务将导致【当前所有在线用户】强制登出。${NC}"
+        read -p "是否继续配置 Redis? (y/n): " confirm_redis
+        if [[ "$confirm_redis" == "y" ]]; then
+            # 检查 Redis 是否已安装
+            if command_exists redis-server; then
+                echo -e "${GREEN}Redis 已安装: $(redis-server --version | head -n 1)${NC}"
+            else
+                echo -e "${YELLOW}未检测到 Redis，准备自动安装...${NC}"
+                if [[ "$OS_NAME" == "ubuntu" ]] || [[ "$OS_NAME" == "debian" ]]; then
+                    sudo apt-get update
+                    sudo apt-get install -y redis-server
+                elif [[ "$OS_NAME" == "centos" ]] || [[ "$OS_NAME" == "rhel" ]]; then
+                    # CentOS 需要 EPEL 源
+                    if ! rpm -qa | grep -q epel-release; then
+                        sudo yum install -y epel-release
+                    fi
+                    sudo yum install -y redis
+                else
+                    echo -e "${RED}不支持的自动安装系统: $OS_NAME，请手动安装 Redis${NC}"
+                fi
+            fi
+
+            # 启动服务 & 健康检查
+            if command_exists redis-server; then
+                echo -e "${BLUE}>>> 正在启动 Redis 服务...${NC}"
+                if command_exists systemctl; then
+                    sudo systemctl enable redis-server >/dev/null 2>&1 || sudo systemctl enable redis >/dev/null 2>&1
+                    sudo systemctl start redis-server || sudo systemctl start redis
+                else
+                    redis-server --daemonize yes
+                fi
+                
+                sleep 2
+                
+                if command_exists redis-cli; then
+                    if redis-cli ping | grep -q "PONG"; then
+                         echo -e "${GREEN}Redis 连接测试通过 (PONG)${NC}"
+                         
+                         # 修改项目配置 (.env)
+                         echo -e "${BLUE}>>> 正在配置项目环境变量...${NC}"
+                         ENV_FILE=".env"
+                         if [ -f "$ENV_FILE" ]; then
+                             cp "$ENV_FILE" "${ENV_FILE}.bak_$(date +%Y%m%d%H%M%S)"
+                             if grep -q "USE_REDIS=" "$ENV_FILE"; then
+                                 sed -i "s/USE_REDIS=.*/USE_REDIS=true/g" "$ENV_FILE" 2>/dev/null || sed -i '' "s/USE_REDIS=.*/USE_REDIS=true/g" "$ENV_FILE"
+                             else
+                                 echo "USE_REDIS=true" >> "$ENV_FILE"
+                             fi
+                             if ! grep -q "REDIS_URL=" "$ENV_FILE"; then
+                                 echo "REDIS_URL=redis://localhost:6379" >> "$ENV_FILE"
+                             fi
+                             echo -e "${GREEN}配置已更新: 已启用 Redis 模式${NC}"
+                         fi
+                    else
+                         echo -e "${RED}错误: Redis 服务启动失败或无法连接。${NC}"
+                    fi
+                fi
+            fi
+        fi
     fi
 
-    # 2. 处理 REDIS_URL
-    if ! grep -q "REDIS_URL=" "$ENV_FILE"; then
-         echo "REDIS_URL=redis://localhost:6379" >> "$ENV_FILE"
-    fi
-
-    echo -e "${GREEN}配置已更新: 已启用 Redis 模式${NC}"
+    echo -e "${GREEN}>>> 环境检查与配置完成${NC}"
     
-    # 4. 询问是否立即重启
+    # 询问是否立即重启
     echo ""
     read -p "是否立即重启服务以应用更改? (y/n): " confirm_restart
     if [[ "$confirm_restart" == "y" ]]; then
@@ -386,7 +392,11 @@ start_app() {
         sync_env
     fi
 
-    if [ -f "$PID_FILE" ]; then
+    if [ -f "$PID_FILE" ] || is_app_in_pm2; then
+        if is_app_in_pm2; then
+             echo -e "${YELLOW}服务已在 PM2 中运行${NC}"
+             return
+        fi
         current_pid=$(cat "$PID_FILE")
         if ps -p "$current_pid" > /dev/null 2>&1; then
             echo -e "${YELLOW}服务已在运行中 (PID: $current_pid)${NC}"
@@ -397,6 +407,21 @@ start_app() {
     fi
 
     echo -e "${GREEN}>>> 正在启动服务...${NC}"
+    
+    if is_pm2_installed; then
+        echo -e "${BLUE}检测到 PM2，将使用 ecosystem.config.js 启动集群模式...${NC}"
+        pm2 start ecosystem.config.js --env production
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}服务已通过 PM2 启动成功!${NC}"
+            if [ "$persist" = true ]; then
+                pm2 save
+                echo -e "${BLUE}已执行 pm2 save 保持自启状态${NC}"
+            fi
+            return 0
+        fi
+        echo -e "${YELLOW}PM2 启动失败，尝试回退到传统模式...${NC}"
+    fi
+
     nohup node "$APP_MAIN" > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo "$new_pid" > "$PID_FILE"
@@ -442,6 +467,17 @@ stop_app() {
     local persist=true
     if [[ "$1" == "--no-persist" ]]; then
         persist=false
+    fi
+
+    if is_app_in_pm2; then
+        echo -e "${BLUE}检测到服务由 PM2 管理，正在通过 PM2 停止...${NC}"
+        pm2 stop exam-system
+        if [ "$persist" = true ]; then
+            pm2 save
+            echo -e "${BLUE}已更新 PM2 状态保存${NC}"
+        fi
+        echo -e "${GREEN}服务已停止 (PM2)${NC}"
+        return
     fi
 
     local pid=""
@@ -506,6 +542,12 @@ restart_app() {
 }
 
 status_app() {
+    if is_app_in_pm2; then
+        echo -e "${GREEN}● 服务运行中 (PM2 集群模式)${NC}"
+        pm2 show exam-system | grep -E "status|instances|uptime|mem|cpu"
+        return
+    fi
+
     local is_running=false
     local pid=""
     
@@ -549,6 +591,12 @@ status_app() {
 }
 
 view_logs() {
+    if is_app_in_pm2; then
+        echo -e "${BLUE}正在通过 PM2 追踪日志 (按 Ctrl+C 退出)...${NC}"
+        pm2 logs exam-system
+        return
+    fi
+
     if [ ! -f "$LOG_FILE" ]; then
         echo "暂无日志文件"
         return
@@ -867,7 +915,7 @@ show_menu() {
     echo -e " 8. ${YELLOW}初始化数据库 (Init DB)${NC}"
     echo -e " 9. ${GREEN}系统更新 (Update)${NC}"
     echo -e " 10. ${BLUE}系统还原 (Restore)${NC}"
-    echo -e " 11. ${GREEN}一键配置 Redis (Auto Redis)${NC}"
+    echo -e " 11. ${GREEN}一键配置 Redis & PM2 (Auto Redis & PM2)${NC}"
     echo " 0. 退出 (Exit)"
     echo -e "${BLUE}================================${NC}"
 }
@@ -888,7 +936,7 @@ if [ -z "$ACTION" ]; then
             8) init_sqlite_db ;;
             9) update_app ;;
             10) restore_app ;;
-            11) install_redis ;;
+            11) install_redis_pm2 ;;
             0) echo "再见!"; exit 0 ;;
             *) echo -e "${RED}无效选项，请重新输入${NC}" ;;
         esac

@@ -1,7 +1,28 @@
 const API_BASE = '';
 let currentUser = null;
+const SESSION_ONLY_KEYS = new Set(['auth_token']);
 const SafeStorage = {
   get(key) {
+    if (SESSION_ONLY_KEYS.has(key)) {
+      try {
+        const v = sessionStorage.getItem(key);
+        if (v !== null && v !== undefined) return v;
+      } catch (e) {
+      }
+      try {
+        const v = localStorage.getItem(key);
+        if (v !== null && v !== undefined) {
+          try {
+            sessionStorage.setItem(key, v);
+          } catch (e) {}
+          try {
+            localStorage.removeItem(key);
+          } catch (e) {}
+          return v;
+        }
+      } catch (e) {}
+      return null;
+    }
     try {
       const v = localStorage.getItem(key);
       if (v !== null && v !== undefined) return v;
@@ -13,6 +34,15 @@ const SafeStorage = {
     }
   },
   set(key, value) {
+    if (SESSION_ONLY_KEYS.has(key)) {
+      try {
+        sessionStorage.setItem(key, value);
+      } catch (e) {}
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {}
+      return;
+    }
     try {
       localStorage.setItem(key, value);
       return;
@@ -189,6 +219,24 @@ const Storage = {
     currentUser = null;
     SafeStorage.remove('current_user');
     SafeStorage.remove('auth_token');
+  },
+
+  async logoutRemote() {
+    const token = SafeStorage.get('auth_token');
+    if (token) {
+      try {
+        await window.fetch(`${API_BASE}/api/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({})
+        });
+      } catch (e) {
+      }
+    }
+    Storage.logout();
   },
 
   // ==================== 分组相关 ====================

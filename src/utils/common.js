@@ -2,7 +2,13 @@ const crypto = require('crypto');
 
 // 获取客户端IP
 const getClientIp = (req) => {
-    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    const trustProxy = process.env.TRUST_PROXY === 'true';
+    if (trustProxy) {
+        const xff = req.headers['x-forwarded-for'];
+        const first = typeof xff === 'string' ? xff.split(',')[0]?.trim() : null;
+        if (first) return first;
+    }
+    return req.ip ||
         req.connection?.remoteAddress ||
         req.socket?.remoteAddress ||
         'unknown';

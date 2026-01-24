@@ -40,7 +40,8 @@ async function verifyPassword(inputPassword, storedPassword) {
     try {
         return await bcrypt.compare(inputPassword, storedPassword);
     } catch (e) {
-        return inputPassword === storedPassword; // 最后的兜底：明文对比（仅限极早期数据）
+        const allowPlaintext = process.env.ALLOW_PLAINTEXT_PASSWORDS === 'true';
+        return allowPlaintext ? inputPassword === storedPassword : false;
     }
 }
 

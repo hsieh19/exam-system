@@ -49,7 +49,7 @@ async function loadExams() {
         <div class="exam-main-info">
           <div class="exam-title-group">
             <h3>${escapeHtml(paper.name)}</h3>
-            <button class="btn ${paper.isOngoing ? 'btn-warning' : 'btn-primary'} btn-start-exam mobile-only-btn" data-paper-id="${paper.id}" onclick="startExam('${paper.id}')">
+            <button class="btn ${paper.isOngoing ? 'btn-warning' : 'btn-primary'} btn-start-exam mobile-only-btn" data-id="${paper.id}" onclick="safeOnclick(this, 'startExam', ['id'])">
               ${paper.isOngoing ? '继续考试' : '开始答题'}
             </button>
           </div>
@@ -62,7 +62,7 @@ async function loadExams() {
           <div class="countdown-timer hidden" id="countdown-${paper.id}" data-deadline="${paper.deadline}">
             距离截止：<span class="timer-value">--:--:--</span>
           </div>
-          <button class="btn ${paper.isOngoing ? 'btn-warning' : 'btn-primary'} btn-start-exam desktop-only-btn" data-paper-id="${paper.id}" onclick="startExam('${paper.id}')">
+          <button class="btn ${paper.isOngoing ? 'btn-warning' : 'btn-primary'} btn-start-exam desktop-only-btn" data-id="${paper.id}" onclick="safeOnclick(this, 'startExam', ['id'])">
             ${paper.isOngoing ? '继续考试' : '开始答题'}
           </button>
         </div>
@@ -79,8 +79,10 @@ async function loadExams() {
 
 function startCountdown(paperId, deadlineStr) {
   const timerContainer = document.getElementById(`countdown-${paperId}`);
+  if (!timerContainer) return;
   const timerValue = timerContainer.querySelector('.timer-value');
-  const startBtn = document.getElementById(`btn-start-${paperId}`);
+  const examItem = timerContainer.closest('.exam-item');
+  const startBtns = examItem ? examItem.querySelectorAll('.btn-start-exam') : [];
   
   // 处理日期格式，将 "YYYY-MM-DD HH:mm" 转换为 "YYYY-MM-DDTHH:mm:00"
   const deadline = new Date(deadlineStr.replace(' ', 'T') + ':00');
@@ -92,8 +94,10 @@ function startCountdown(paperId, deadlineStr) {
     if (diff <= 0) {
       timerValue.textContent = '已截止';
       timerContainer.classList.remove('hidden');
-      startBtn.disabled = true;
-      startBtn.textContent = '考试已截止';
+      startBtns.forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = '考试已截止';
+      });
       return false;
     }
 
@@ -145,7 +149,7 @@ async function loadRanking(paperId) {
 
   let html = myRecord ? `
     <div class="my-score mb-6">
-      <div class="score-item"><span class="score-label">答题用户：</span><span class="score-value">${user.username}</span></div>
+      <div class="score-item"><span class="score-label">答题用户：</span><span class="score-value">${escapeHtml(user.username)}</span></div>
       <div class="score-item"><span class="score-label">得分：</span><span class="score-value">${myRecord.score}</span></div>
       <div class="score-item"><span class="score-label">排名：</span><span class="score-value">${myRecord.rank}/${totalAssigned}</span></div>
       <div class="score-item"><span class="score-label">答题用时：</span><span class="score-value">${formatDuration(myRecord.totalTime, true)}</span></div>

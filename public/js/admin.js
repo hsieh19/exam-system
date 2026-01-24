@@ -264,12 +264,12 @@ function loadGroups() {
 
         // 只有超管可以编辑和删除分组
         const editBtn = user.role === 'super_admin' ?
-            `<button class="btn btn-sm btn-primary" style="margin-right: 5px;" onclick="event.stopPropagation();showEditGroup('${g.id}', '${escapeHtml(g.name)}')">编辑</button>` : '';
+            `<button class="btn btn-sm btn-primary" style="margin-right: 5px;" data-id="${g.id}" data-name="${g.name}" onclick="event.stopPropagation();safeOnclick(this, 'showEditGroup', ['id', 'name'])">编辑</button>` : '';
         const deleteBtn = user.role === 'super_admin' ?
-            `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteGroup('${g.id}')">删除</button>` : '';
+            `<button class="btn btn-sm btn-danger" data-id="${g.id}" onclick="event.stopPropagation();safeOnclick(this, 'deleteGroup', ['id'])">删除</button>` : '';
 
         return `
-                    <div class="group-item" onclick="selectGroup('${g.id}')" 
+                    <div class="group-item" data-id="${g.id}" onclick="safeOnclick(this, 'selectGroup', ['id'])" 
                          style="padding:12px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); ${activeStyle} min-width: 0;">
                         <span style="font-weight:${isActive ? '600' : '400'}; color:${isActive ? 'var(--primary)' : 'inherit'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 12px;">${escapeHtml(g.name)}</span>
                         <div style="display: flex; align-items: center; flex-shrink: 0;">
@@ -363,7 +363,7 @@ async function saveGroup() {
 function showEditGroup(id, currentName) {
     openModal('编辑分组',
         `<div class="form-group"><label class="form-label">分组名称</label><input type="text" class="form-input" id="edit-group-name" value="${escapeHtml(currentName)}"></div>`,
-        `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="updateGroupName('${id}')">更新</button>`);
+        `<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" data-id="${id}" onclick="safeOnclick(this, 'updateGroupName', ['id'])">更新</button>`);
 }
 
 async function updateGroupName(id) {
@@ -431,14 +431,14 @@ function renderUsers() {
 
             const actions = [];
             if (canManageRole) {
-                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
-                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" data-id="${u.id}" data-role="group_admin" onclick="safeOnclick(this, 'toggleUserRole', ['id', 'role'])">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" data-id="${u.id}" data-role="super_admin" onclick="safeOnclick(this, 'toggleUserRole', ['id', 'role'])">${isSuper ? '取消超管' : '设为超管'}</button>`);
             }
             if (canEdit) {
-                actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+                actions.push(`<button class="btn btn-sm btn-secondary" data-id="${u.id}" onclick="safeOnclick(this, 'showEditUser', ['id'])">编辑</button>`);
             }
             if (canDelete) {
-                actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+                actions.push(`<button class="btn btn-sm btn-danger" data-id="${u.id}" onclick="safeOnclick(this, 'deleteUser', ['id'])">删除</button>`);
             }
 
             const moreMenu = actions.length ? actions.map(a => `<div class="user-action-menu-item">${a}</div>`).join('') : `<div class="text-muted" style="padding:6px 10px;">无可用操作</div>`;
@@ -473,14 +473,14 @@ function renderUsers() {
 
             const actions = [];
             if (canManageRole) {
-                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" onclick="toggleUserRole('${u.id}', 'group_admin')">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
-                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" onclick="toggleUserRole('${u.id}', 'super_admin')">${isSuper ? '取消超管' : '设为超管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isGroupAdmin ? 'btn-danger' : 'btn-primary'}" data-id="${u.id}" data-role="group_admin" onclick="safeOnclick(this, 'toggleUserRole', ['id', 'role'])">${isGroupAdmin ? '取消组管' : '设为组管'}</button>`);
+                actions.push(`<button class="btn btn-sm ${isSuper ? 'btn-danger' : 'btn-secondary'}" data-id="${u.id}" data-role="super_admin" onclick="safeOnclick(this, 'toggleUserRole', ['id', 'role'])">${isSuper ? '取消超管' : '设为超管'}</button>`);
             }
             if (canEdit) {
-                actions.push(`<button class="btn btn-sm btn-secondary" onclick="showEditUser('${u.id}')">编辑</button>`);
+                actions.push(`<button class="btn btn-sm btn-secondary" data-id="${u.id}" onclick="safeOnclick(this, 'showEditUser', ['id'])">编辑</button>`);
             }
             if (canDelete) {
-                actions.push(`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">删除</button>`);
+                actions.push(`<button class="btn btn-sm btn-danger" data-id="${u.id}" onclick="safeOnclick(this, 'deleteUser', ['id'])">删除</button>`);
             }
 
             if (isMobile) {
@@ -495,7 +495,7 @@ function renderUsers() {
             <td class="text-center">
               <div class="user-actions">
                 <div class="user-action-group" id="uag-${u.id}">
-                  <button class="btn btn-sm btn-secondary user-action-more" onclick="toggleUserActionMenu('${u.id}')">⋯</button>
+                  <button class="btn btn-sm btn-secondary user-action-more" data-id="${u.id}" onclick="safeOnclick(this, 'toggleUserActionMenu', ['id'])">⋯</button>
                   <div class="user-action-more-menu" id="uam-${u.id}">${moreMenu}</div>
                 </div>
               </div>
@@ -733,11 +733,11 @@ function showCategorySettings() {
                     </div>
                     <div class="major-list" id="majors-list">
                         ${majors.length ? majors.map(m => `
-                            <div class="major-item ${m.id === selectedMajorId ? 'active' : ''}" onclick="selectMajor('${m.id}')">
+                            <div class="major-item ${m.id === selectedMajorId ? 'active' : ''}" data-id="${m.id}" onclick="safeOnclick(this, 'selectMajor', ['id'])">
                                 <span>${escapeHtml(m.name)}</span>
                                 <div class="major-actions">
-                                    <button class="btn-icon-xs edit" onclick="event.stopPropagation();editMajor('${m.id}','${escapeHtml(m.name)}')" title="重命名">✎</button>
-                                    <button class="btn-icon-xs delete" onclick="event.stopPropagation();deleteMajor('${m.id}')" title="删除">🗑️</button>
+                                    <button class="btn-icon-xs edit" data-id="${m.id}" data-name="${m.name}" onclick="event.stopPropagation();safeOnclick(this, 'editMajor', ['id','name'])" title="重命名">✎</button>
+                                    <button class="btn-icon-xs delete" data-id="${m.id}" onclick="event.stopPropagation();safeOnclick(this, 'deleteMajor', ['id'])" title="删除">🗑️</button>
                                 </div>
                             </div>
                         `).join('') : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">暂无专业<br>请先添加</div>'}
@@ -748,7 +748,7 @@ function showCategorySettings() {
                 <div class="settings-content">
                     <h3 style="font-size:15px;margin-bottom:16px;font-weight:600;display:flex;align-items:center;gap:8px;">
                         <span style="color:var(--text-secondary);">当前专业：</span>
-                        <span style="color:var(--primary);">${selectedMajorId ? (majors.find(m => m.id === selectedMajorId)?.name || '') : '-'}</span>
+                        <span style="color:var(--primary);">${selectedMajorId ? escapeHtml(majors.find(m => m.id === selectedMajorId)?.name || '') : '-'}</span>
                     </h3>
                     
                     <div id="devices-panel">
@@ -792,8 +792,8 @@ function renderDevicesPanelContent() {
                 <div class="device-tag">
                     <span class="device-name">${escapeHtml(d.name)}</span>
                     <div class="device-actions">
-                        <button class="btn-circle-xs edit" onclick="editDevice('${d.id}','${escapeHtml(d.name)}')" title="重命名">✎</button>
-                        <button class="btn-circle-xs delete" onclick="deleteDevice('${d.id}')" title="删除">✕</button>
+                        <button class="btn-circle-xs edit" data-id="${d.id}" data-name="${d.name}" onclick="safeOnclick(this, 'editDevice', ['id','name'])" title="重命名">✎</button>
+                        <button class="btn-circle-xs delete" data-id="${d.id}" onclick="safeOnclick(this, 'deleteDevice', ['id'])" title="删除">✕</button>
                     </div>
                 </div>
             `).join('') : '<div style="width:100%;padding:30px;text-align:center;background:var(--bg-body);border-radius:var(--radius-md);border:1px dashed var(--border);color:var(--text-muted);">该专业下暂无设备类型，请添加</div>'}
@@ -1031,7 +1031,8 @@ function initGroupFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${currentGroupFilter === opt.id ? 'active' : ''}" 
-             onclick="selectFilter('group', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="group" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1054,7 +1055,8 @@ function initTypeFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${currentTypeFilter === opt.id ? 'active' : ''}" 
-             onclick="selectFilter('type', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="type" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1076,7 +1078,8 @@ function initMajorFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${currentMajorFilter === opt.id ? 'active' : ''}" 
-             onclick="selectFilter('major', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="major" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1194,7 +1197,8 @@ function initSelectorGroupFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${selectorGroupFilter === opt.id ? 'active' : ''}" 
-             onclick="selectSelectorFilter('group', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="group" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1210,7 +1214,8 @@ function initSelectorMajorFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${selectorMajorFilter === opt.id ? 'active' : ''}" 
-             onclick="selectSelectorFilter('major', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="major" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1226,7 +1231,8 @@ function initSelectorDeviceFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${selectorDeviceFilter === opt.id ? 'active' : ''}" 
-             onclick="selectSelectorFilter('device', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="device" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1285,7 +1291,8 @@ function initDeviceFilterDropdown() {
 
     menu.innerHTML = options.map(opt => `
         <div class="dropdown-item ${currentDeviceFilter === opt.id ? 'active' : ''}" 
-             onclick="selectFilter('device', '${opt.id}', '${escapeHtml(opt.name)}')"
+             data-type="device" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
@@ -1353,8 +1360,8 @@ function loadQuestions() {
       <td><span class="badge ${q.type === 'single' ? 'badge-primary' : (q.type === 'multiple' ? 'badge-warning' : 'badge-success')}">${typeMap[q.type]}</span></td>
       <td style="white-space:nowrap;">${formatFullDateTime(q.updatedAt)}</td>
       <td>
-        ${canEdit ? `<button class="btn btn-sm btn-secondary" onclick="editQuestion('${q.id}')">编辑</button>` : ''}
-        ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteQuestion('${q.id}')">删除</button>` : ''}
+        ${canEdit ? `<button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'editQuestion', ['id'])">编辑</button>` : ''}
+        ${canDelete ? `<button class="btn btn-sm btn-danger" data-id="${q.id}" onclick="safeOnclick(this, 'deleteQuestion', ['id'])">删除</button>` : ''}
       </td>
     </tr>`;
     }).join('')}</tbody></table></div>` : `<p class="text-muted">所选条件下暂无题目</p>`;
@@ -1408,7 +1415,7 @@ function showQuestionEditor(type) {
       <div id="options-container" class="options-grid">
         ${opts.map((o, i) => `<div class="option-row"><span class="option-label">${'ABCDEFGH'[i]}.</span>
           <input type="text" class="form-input" value="${escapeHtml(o)}" placeholder="选项内容">
-          <button class="btn btn-sm btn-danger" onclick="removeOption(this)" ${opts.length <= 2 ? 'disabled' : ''} style="padding:4px 8px;font-size:12px;">删除</button>
+          <button class="btn btn-sm btn-danger" onclick="safeOnclick(this, 'removeOption')" ${opts.length <= 2 ? 'disabled' : ''} style="padding:4px 8px;font-size:12px;">删除</button>
         </div>`).join('')}
       </div>
       <div class="add-option-btn" onclick="addOption()">
@@ -1449,13 +1456,13 @@ function showQuestionEditor(type) {
       </div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">题目</label>
-        <textarea class="form-input" id="q-content" rows="3" placeholder="请输入题目内容">${q.content}</textarea></div>
+        <textarea class="form-input" id="q-content" rows="3" placeholder="请输入题目内容">${escapeHtml(q.content)}</textarea></div>
       ${optionsHtml}`;
 
     if (editingQuestion) {
         // 编辑模式使用弹窗
         const footerHtml = `
-          <button class="btn btn-success" onclick="saveQuestion('${type}')">保存</button>
+          <button class="btn btn-success" data-type="${type}" onclick="safeOnclick(this, 'saveQuestion', ['type'])">保存</button>
           <button class="btn btn-secondary" onclick="closeModal()">取消</button>`;
         openModal(`${editingQuestion ? '编辑' : '新增'}${typeNames[type]}`, editorInnerHtml, footerHtml);
     } else {
@@ -1467,7 +1474,7 @@ function showQuestionEditor(type) {
             <div class="card-body">
               ${editorInnerHtml}
               <div class="flex gap-3" style="margin-top:20px;">
-                <button class="btn btn-success" onclick="saveQuestion('${type}')">保存</button>
+                <button class="btn btn-success" data-type="${type}" onclick="safeOnclick(this, 'saveQuestion', ['type'])">保存</button>
                 <button class="btn btn-secondary" onclick="cancelQuestionEdit()">取消</button>
               </div>
             </div>
@@ -1497,7 +1504,7 @@ function addOption() {
     container.insertAdjacentHTML('beforeend', `<div class="option-row">
         <span class="option-label">${label}.</span>
         <input type="text" class="form-input" placeholder="选项内容">
-        <button class="btn btn-sm btn-danger" onclick="removeOption(this)" style="padding:4px 8px;font-size:12px;">删除</button>
+        <button class="btn btn-sm btn-danger" onclick="safeOnclick(this, 'removeOption')" style="padding:4px 8px;font-size:12px;">删除</button>
     </div>`);
     updateOptionLabels(container);
 }
@@ -1663,11 +1670,11 @@ function loadPapers() {
       <td><span class="badge ${p.published ? 'badge-success' : 'badge-warning'}">${p.published ? '已发布' : '草稿'}</span></td>
       <td>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-secondary" onclick="showPushLogs('${p.id}')">推送记录</button>
+            <button class="btn btn-sm btn-secondary" data-id="${p.id}" onclick="safeOnclick(this, 'showPushLogs', ['id'])">推送记录</button>
             ${canManage ? `
-                <button class="btn btn-sm btn-info" onclick="editPaper('${p.id}')">编辑</button>
-                <button class="btn btn-sm btn-primary" onclick="showPublishModal('${p.id}')">推送</button>
-                <button class="btn btn-sm btn-danger" onclick="deletePaper('${p.id}')">删除</button>
+                <button class="btn btn-sm btn-info" data-id="${p.id}" onclick="safeOnclick(this, 'editPaper', ['id'])">编辑</button>
+                <button class="btn btn-sm btn-primary" data-id="${p.id}" onclick="safeOnclick(this, 'showPublishModal', ['id'])">推送</button>
+                <button class="btn btn-sm btn-danger" data-id="${p.id}" onclick="safeOnclick(this, 'deletePaper', ['id'])">删除</button>
             ` : ''}
         </div>
       </td></tr>`;
@@ -1827,7 +1834,7 @@ function updateRulesTable() {
                 : '<span class="text-muted">-</span>'}</td>
             <td style="text-align:center;"><input type="number" class="form-input" style="width:70px;text-align:center;" value="${rule.timeLimit}" min="5" onchange="updateRule(${rule.id}, 'timeLimit', this.value)"></td>
             <td style="text-align:center;">${rule.count * rule.score}</td>
-            <td style="text-align:center;"><button class="btn btn-sm btn-danger" onclick="removeRule(${rule.id})">删除</button></td>
+            <td style="text-align:center;"><button class="btn btn-sm btn-danger" data-id="${rule.id}" onclick="safeOnclick(this, 'removeRule', ['id'])">删除</button></td>
         </tr>
     `}).join('');
 
@@ -1921,7 +1928,7 @@ function showManualSelect() {
     paperRules.forEach(rule => {
         if (!selectedQuestions[rule.type]) selectedQuestions[rule.type] = [];
         const currentCount = selectedQuestions[rule.type].length;
-        html += `<button class="btn btn-secondary" onclick="showQuestionSelector('${rule.type}', ${rule.count})">
+        html += `<button class="btn btn-secondary" data-type="${rule.type}" data-max="${rule.count}" onclick="safeOnclick(this, 'showQuestionSelector', ['type', 'max'])">
             ${typeNames[rule.type]} (已选 <span id="selected-count-${rule.type}">${currentCount}</span>/${rule.count})
         </button>`;
     });
@@ -1954,7 +1961,7 @@ function showQuestionSelector(type, maxCount) {
                 <label class="form-label-sm">题库/分组</label>
                 <div class="dropdown-filter" id="selector-group-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-group-filter"
-                        onclick="toggleSelectorFilterDropdown('group')"
+                        data-type="group" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
                         style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
                         <span id="selector-group-filter-label">全部题库</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1970,7 +1977,7 @@ function showQuestionSelector(type, maxCount) {
                 <label class="form-label-sm">专业</label>
                 <div class="dropdown-filter" id="selector-major-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-major-filter"
-                        onclick="toggleSelectorFilterDropdown('major')"
+                        data-type="major" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
                         style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
                         <span id="selector-major-filter-label">全部专业</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1986,7 +1993,7 @@ function showQuestionSelector(type, maxCount) {
                 <label class="form-label-sm">设备类型</label>
                 <div class="dropdown-filter" id="selector-device-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-secondary" id="btn-selector-device-filter"
-                        onclick="toggleSelectorFilterDropdown('device')" disabled
+                        data-type="device" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])" disabled
                         style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;opacity:0.5;cursor:not-allowed;">
                         <span id="selector-device-filter-label">全部设备</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2071,7 +2078,7 @@ function renderQuestionSelectorTable(type, maxCount) {
             <td style="white-space:nowrap;"><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
             <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(q.content)}">${escapeHtml(q.content)}</td>
             <td style="text-align:center;white-space:nowrap;">
-                <button class="btn btn-sm btn-secondary" onclick="viewQuestionDetail('${q.id}')">查看</button>
+                <button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'viewQuestionDetail', ['id'])">查看</button>
             </td>
         </tr>`).join('') : '<tr><td colspan="5" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
 }
@@ -2334,7 +2341,7 @@ function showPublishModal(paperId) {
 
     openModal('推送试卷 - ' + paper.name, bodyHtml, `
         <button class="btn btn-secondary" onclick="closeModal()">取消</button>
-        <button class="btn btn-primary" onclick="publishPaper('${paperId}')">确认推送</button>
+        <button class="btn btn-primary" data-id="${paperId}" onclick="safeOnclick(this, 'publishPaper', ['id'])">确认推送</button>
     `);
 }
 
@@ -3515,26 +3522,26 @@ function renderLogsPagination(result) {
     }
 
     if (startPage > 1) {
-        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(1)">1</button>`;
+        pagesHtml += `<button class="btn btn-sm btn-secondary" data-page="1" onclick="safeOnclick(this, 'loadSystemLogs', ['page'])">1</button>`;
         if (startPage > 2) pagesHtml += `<span style="padding:0 8px;">...</span>`;
     }
 
     for (let i = startPage; i <= endPage; i++) {
         const isActive = i === page;
-        pagesHtml += `<button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}" onclick="loadSystemLogs(${i})">${i}</button>`;
+        pagesHtml += `<button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-secondary'}" data-page="${i}" onclick="safeOnclick(this, 'loadSystemLogs', ['page'])">${i}</button>`;
     }
 
     if (endPage < totalPages) {
         if (endPage < totalPages - 1) pagesHtml += `<span style="padding:0 8px;">...</span>`;
-        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${totalPages})">${totalPages}</button>`;
+        pagesHtml += `<button class="btn btn-sm btn-secondary" data-page="${totalPages}" onclick="safeOnclick(this, 'loadSystemLogs', ['page'])">${totalPages}</button>`;
     }
 
     container.innerHTML = `
         <span style="color:var(--text-secondary);font-size:13px;">共 ${total} 条记录，第 ${page}/${totalPages} 页</span>
         <div style="display:flex;gap:4px;align-items:center;">
-            <button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+            <button class="btn btn-sm btn-secondary" data-page="${page - 1}" onclick="safeOnclick(this, 'loadSystemLogs', ['page'])" ${page <= 1 ? 'disabled' : ''}>上一页</button>
             ${pagesHtml}
-            <button class="btn btn-sm btn-secondary" onclick="loadSystemLogs(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+            <button class="btn btn-sm btn-secondary" data-page="${page + 1}" onclick="safeOnclick(this, 'loadSystemLogs', ['page'])" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
         </div>
     `;
 }
