@@ -15,6 +15,7 @@ const { createClient } = require('redis');
 class MemoryStore {
     constructor() {
         this.sessions = new Map();
+        this.userTokens = new Map();
         this.cleanupInterval = null;
     }
 
@@ -28,6 +29,11 @@ class MemoryStore {
                 if (session.expiresAt <= now) {
                     this.sessions.delete(token);
                     cleanedCount++;
+                }
+            }
+            for (const [userId, entry] of this.userTokens.entries()) {
+                if (!entry || entry.expiresAt <= now) {
+                    this.userTokens.delete(userId);
                 }
             }
             if (cleanedCount > 0) {
@@ -51,12 +57,32 @@ class MemoryStore {
         this.sessions.set(token, { user, expiresAt });
     }
 
+    async getUserToken(userId) {
+        const entry = this.userTokens.get(userId);
+        if (!entry) return null;
+        if (entry.expiresAt <= Date.now()) {
+            this.userTokens.delete(userId);
+            return null;
+        }
+        return entry.token || null;
+    }
+
+    async setUserToken(userId, token, ttlMs) {
+        const expiresAt = Date.now() + ttlMs;
+        this.userTokens.set(userId, { token, expiresAt });
+    }
+
+    async deleteUserToken(userId) {
+        this.userTokens.delete(userId);
+    }
+
     async delete(token) {
         this.sessions.delete(token);
     }
 
     async clear() {
         this.sessions.clear();
+        this.userTokens.clear();
     }
 
     async destroy() {
@@ -101,6 +127,18 @@ class RedisStore {
         });
     }
 
+    async getUserToken(userId) {
+        return await this.client.get(`user_sess:${userId}`);
+    }
+
+    async setUserToken(userId, token, ttlMs) {
+        await this.client.set(`user_sess:${userId}`, token, { PX: ttlMs });
+    }
+
+    async deleteUserToken(userId) {
+        await this.client.del(`user_sess:${userId}`);
+    }
+
     async delete(token) {
         await this.client.del(`sess:${token}`);
     }
@@ -114,6 +152,19 @@ class RedisStore {
         do {
             const reply = await this.client.scan(cursor, {
                 MATCH: 'sess:*',
+                COUNT: 100
+            });
+            cursor = reply.cursor;
+            const keys = reply.keys;
+            if (keys.length > 0) {
+                await this.client.del(keys);
+            }
+        } while (cursor !== 0);
+
+        cursor = 0;
+        do {
+            const reply = await this.client.scan(cursor, {
+                MATCH: 'user_sess:*',
                 COUNT: 100
             });
             cursor = reply.cursor;

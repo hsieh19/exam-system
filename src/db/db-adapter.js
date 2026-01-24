@@ -88,7 +88,10 @@ const sqliteAdapter = {
                 password TEXT NOT NULL,
                 role TEXT DEFAULT 'student',
                 groupId TEXT,
-                isFirstLogin INTEGER DEFAULT 1
+                isFirstLogin INTEGER DEFAULT 1,
+                feishuUserId TEXT,
+                feishuOpenId TEXT,
+                feishuEnabled INTEGER DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS groups (
                 id TEXT PRIMARY KEY,
@@ -188,6 +191,9 @@ const sqliteAdapter = {
         checkAndAddColumn('papers', 'published', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'publishDate', 'TEXT');
         checkAndAddColumn('users', 'isFirstLogin', 'INTEGER DEFAULT 1');
+        checkAndAddColumn('users', 'feishuUserId', 'TEXT');
+        checkAndAddColumn('users', 'feishuOpenId', 'TEXT');
+        checkAndAddColumn('users', 'feishuEnabled', 'INTEGER DEFAULT 1');
         checkAndAddColumn('exam_sessions', 'lastQuestionStartTime', 'TEXT');
 
         // 确保有管理员账号
@@ -295,7 +301,9 @@ const mysqlAdapter = {
                 password VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'student',
                 groupId VARCHAR(255),
-                isFirstLogin TINYINT DEFAULT 1
+                isFirstLogin TINYINT DEFAULT 1,
+                feishuUserId VARCHAR(255),
+                feishuOpenId VARCHAR(255)
             )`,
             `CREATE TABLE IF NOT EXISTS \`groups\` (
                 id VARCHAR(255) PRIMARY KEY,
@@ -392,6 +400,18 @@ const mysqlAdapter = {
             if (columns.length === 0) {
                 console.log('MySQL: Adding isFirstLogin column to users table');
                 await this.pool.execute("ALTER TABLE users ADD COLUMN isFirstLogin TINYINT DEFAULT 1");
+            }
+            
+            const [fsUserIdCol] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'feishuUserId'");
+            if (fsUserIdCol.length === 0) {
+                console.log('MySQL: Adding feishuUserId column to users table');
+                await this.pool.execute("ALTER TABLE users ADD COLUMN feishuUserId VARCHAR(255)");
+            }
+
+            const [fsOpenIdCol] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'feishuOpenId'");
+            if (fsOpenIdCol.length === 0) {
+                console.log('MySQL: Adding feishuOpenId column to users table');
+                await this.pool.execute("ALTER TABLE users ADD COLUMN feishuOpenId VARCHAR(255)");
             }
         } catch (e) {
             console.error('MySQL migration error:', e.message);
@@ -598,6 +618,26 @@ const postgresAdapter = {
             if (result.rows.length === 0) {
                 console.log('PostgreSQL: Adding isFirstLogin column to users table');
                 await this.pool.query('ALTER TABLE users ADD COLUMN "isFirstLogin" INTEGER DEFAULT 1');
+            }
+
+            const fsUserIdResult = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='feishuUserId'
+            `);
+            if (fsUserIdResult.rows.length === 0) {
+                console.log('PostgreSQL: Adding feishuUserId column to users table');
+                await this.pool.query('ALTER TABLE users ADD COLUMN "feishuUserId" VARCHAR(255)');
+            }
+
+            const fsOpenIdResult = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='feishuOpenId'
+            `);
+            if (fsOpenIdResult.rows.length === 0) {
+                console.log('PostgreSQL: Adding feishuOpenId column to users table');
+                await this.pool.query('ALTER TABLE users ADD COLUMN "feishuOpenId" VARCHAR(255)');
             }
         } catch (e) {
             console.error('PostgreSQL migration error:', e.message);
@@ -895,12 +935,23 @@ module.exports = {
         const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
         return rows[0];
     },
+    getUserByFeishuId: async (feishuUserId, feishuOpenId) => {
+        if (feishuUserId) {
+            const rows = await query("SELECT * FROM users WHERE feishuUserId = ?", [feishuUserId]);
+            if (rows.length > 0) return rows[0];
+        }
+        if (feishuOpenId) {
+            const rows = await query("SELECT * FROM users WHERE feishuOpenId = ?", [feishuOpenId]);
+            if (rows.length > 0) return rows[0];
+        }
+        return null;
+    },
     addUser: async (user) => {
         const id = user.id || generateId('u_');
         const hashedPwd = await hashPassword(user.password);
-        await run("INSERT INTO users (id, username, password, role, groupId, isFirstLogin) VALUES (?, ?, ?, ?, ?, ?)",
-            [id, user.username, hashedPwd, user.role || 'student', user.groupId || null, user.isFirstLogin !== undefined ? user.isFirstLogin : 1]);
-        return { id, ...user, password: undefined, isFirstLogin: user.isFirstLogin !== undefined ? user.isFirstLogin : 1 };
+        await run("INSERT INTO users (id, username, password, role, groupId, isFirstLogin, feishuUserId, feishuOpenId, feishuEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, user.username, hashedPwd, user.role || 'student', user.groupId || null, user.isFirstLogin !== undefined ? user.isFirstLogin : 1, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1]);
+        return { id, ...user, password: undefined, isFirstLogin: user.isFirstLogin !== undefined ? user.isFirstLogin : 1, feishuEnabled: user.feishuEnabled !== undefined ? user.feishuEnabled : 1 };
     },
     deleteUser: async (id) => {
         await run("DELETE FROM users WHERE id = ?", [id]);
@@ -910,13 +961,17 @@ module.exports = {
             const hashedPwd = await hashPassword(user.password);
             // 如果提供了密码，默认重置 isFirstLogin 为 1，除非明确指定
             const isFirstLogin = user.isFirstLogin !== undefined ? user.isFirstLogin : 1;
-            await run("UPDATE users SET username=?, password=?, role=?, groupId=?, isFirstLogin=? WHERE id=?",
-                [user.username, hashedPwd, user.role, user.groupId, isFirstLogin, user.id]);
+            await run("UPDATE users SET username=?, password=?, role=?, groupId=?, isFirstLogin=?, feishuUserId=?, feishuOpenId=?, feishuEnabled=? WHERE id=?",
+                [user.username, hashedPwd, user.role, user.groupId, isFirstLogin, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         } else {
-            await run("UPDATE users SET username=?, role=?, groupId=? WHERE id=?",
-                [user.username, user.role, user.groupId, user.id]);
+            await run("UPDATE users SET username=?, role=?, groupId=?, feishuUserId=?, feishuOpenId=?, feishuEnabled=? WHERE id=?",
+                [user.username, user.role, user.groupId, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         }
         return sanitizeUser(user);
+    },
+    updateUserFeishuInfo: async (userId, feishuUserId, feishuOpenId) => {
+        await run("UPDATE users SET feishuUserId=?, feishuOpenId=?, isFirstLogin=0 WHERE id=?", [feishuUserId, feishuOpenId, userId]);
+        return true;
     },
     changePassword: async (userId, newPassword) => {
         const hashedPwd = await hashPassword(newPassword);
@@ -935,6 +990,10 @@ module.exports = {
 
     // ==================== 分组相关 ====================
     getGroups: async () => await query("SELECT * FROM groups"),
+    getGroupByName: async (name) => {
+        const rows = await query("SELECT * FROM groups WHERE name = ?", [name]);
+        return rows[0];
+    },
     addGroup: async (group) => {
         const id = group.id || generateId('g_');
         await run("INSERT INTO groups (id, name) VALUES (?, ?)", [id, group.name]);

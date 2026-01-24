@@ -57,6 +57,21 @@ const Auth = {
         return { success: false };
     },
 
+    // 飞书登录
+    async feishuLogin(code) {
+        const user = await Storage.feishuLogin(code);
+        if (user) {
+            // 飞书登录通常不需要强制改密
+            if (user.role === 'super_admin' || user.role === 'group_admin') {
+                window.location.href = 'admin.html';
+            } else {
+                window.location.href = 'student.html';
+            }
+            return { success: true };
+        }
+        return { success: false };
+    },
+
     // 登出
     logout() {
         Storage.logout();

@@ -37,6 +37,13 @@ async function authFetch(url, options = {}) {
   try {
     const res = await window.fetch(url, options);
     if (res.status === 401) {
+      const clone = res.clone();
+      try {
+        const data = await clone.json();
+        if (data && data.error) {
+          SafeStorage.set('logout_reason', data.error);
+        }
+      } catch (e) {}
       Storage.logout();
       if (!window.location.pathname.endsWith('index.html')) {
         window.location.href = 'index.html';
@@ -113,6 +120,29 @@ const Storage = {
     });
   },
 
+  feishuLogin(code) {
+    return window.fetch(`${API_BASE}/api/feishu/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    }).then(r => {
+      if (r.ok) return r.json();
+      return r.json().then(data => { throw new Error(data.error || '飞书登录失败'); });
+    }).then(data => {
+      if (data && data.token && data.user) {
+        currentUser = data.user;
+        SafeStorage.set('current_user', JSON.stringify(data.user));
+        SafeStorage.set('auth_token', data.token);
+        return data.user;
+      }
+      return null;
+    });
+  },
+
+  getFeishuConfig() {
+    return window.fetch(`${API_BASE}/api/feishu/config`).then(r => r.json());
+  },
+
   changePassword(oldPassword, newPassword) {
     return authFetch(`${API_BASE}/api/change-password`, {
       method: 'POST',
@@ -136,8 +166,12 @@ const Storage = {
     if (currentUser) return currentUser;
     const saved = SafeStorage.get('current_user');
     if (saved) {
-      currentUser = JSON.parse(saved);
-      return currentUser;
+      try {
+        currentUser = JSON.parse(saved);
+        return currentUser;
+      } catch (e) {
+        SafeStorage.remove('current_user');
+      }
     }
     return null;
   },

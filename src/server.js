@@ -4,6 +4,8 @@ const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 
+const { version: APP_VERSION } = require('../package.json');
+
 const db = require('./db/db-adapter');
 const { createSessionStore } = require('./utils/session-store');
 const initRoutes = require('./routes/index');
@@ -32,13 +34,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // 获取系统版本号
 app.get('/api/version', (req, res) => {
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
-        res.json({ version: pkg.version });
-    } catch (e) {
-        console.error('获取版本号失败:', e);
-        res.status(500).json({ error: '服务内部错误' });
-    }
+    res.json({ version: APP_VERSION });
 });
 
 app.use(express.static(path.join(__dirname, '../public')));

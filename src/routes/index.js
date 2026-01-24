@@ -5,6 +5,7 @@ const dbConfig = require('../config/db-config');
 const { generateId } = require('../utils/id-generator');
 const { getClientIp, generateSecureToken, validatePasswordStrength } = require('../utils/common');
 const { logAction } = require('../utils/logger');
+const feishuService = require('../utils/feishu');
 
 // Session 配置
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24小时过期
@@ -15,7 +16,8 @@ module.exports = function initRoutes(app, context) {
     // ==================== 认证中间件 ====================
     const authMiddleware = async (req, res, next) => {
         // 白名单
-        if (req.path === '/login') return next();
+        const whiteList = ['/login', '/feishu/login', '/feishu/config'];
+        if (whiteList.includes(req.path)) return next();
 
         const authHeader = req.headers['authorization'];
         if (!authHeader) return res.status(401).json({ error: '未登录或登录已过期' });
@@ -33,6 +35,12 @@ module.exports = function initRoutes(app, context) {
 
             req.user = session.user;
             req.token = token; // 保存 token 以便续期
+
+            const currentToken = await sessionStore.getUserToken(req.user.id);
+            if (currentToken && currentToken !== token) {
+                await sessionStore.delete(token);
+                return res.status(401).json({ error: '账号已在其他设备登录，您已被强制下线' });
+            }
 
             // 强制修改密码检查：如果需要修改密码且当前请求不是修改密码接口，则拦截
             // 默认管理员账号不受此逻辑限制
@@ -70,6 +78,8 @@ module.exports = function initRoutes(app, context) {
         try {
             const session = await sessionStore.get(token);
             if (!token || !session) return res.status(401).end();
+            const currentToken = await sessionStore.getUserToken(session.user.id);
+            if (currentToken && currentToken !== token) return res.status(401).end();
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
@@ -155,25 +165,21 @@ module.exports = function initRoutes(app, context) {
             return res.status(400).json({ error: '请上传文件' });
         }
         try {
-            // 读取文件 buffer
             const fileData = fs.readFileSync(req.file.path);
-
             await db.importSqliteDb(fileData);
 
-            // 清理临时文件
+            await sessionStore.clear();
+            res.json({ success: true, message: '数据库导入成功，请重新登录' });
+            broadcast('db_change', { resource: 'all' });
+        } catch (e) {
+            console.error('数据库导入失败:', e);
+            res.status(500).json({ error: '数据库导入失败，请检查文件' });
+        } finally {
             try {
                 fs.unlinkSync(req.file.path);
             } catch (e) {
                 console.error('临时文件清理失败:', req.file.path, e.message);
             }
-
-            // 清除所有会话，强制重新登录
-            await sessionStore.clear();
-            res.json({ success: true, message: '数据库导入成功，请重新登录' });
-            broadcast('db_change', { resource: 'all' });
-        } catch (e) {
-            console.error('切换数据库失败:', e);
-            res.status(500).json({ error: '切换数据库失败，请检查配置' });
         }
     });
 
@@ -287,6 +293,7 @@ module.exports = function initRoutes(app, context) {
             if (session && session.user) {
                 session.user.isFirstLogin = 0;
                 await sessionStore.set(req.token, session.user, SESSION_EXPIRY_MS);
+                await sessionStore.setUserToken(userId, req.token, SESSION_EXPIRY_MS);
             }
 
             await logAction('修改密码', 'user', userId, req.user, {}, getClientIp(req));
@@ -297,14 +304,129 @@ module.exports = function initRoutes(app, context) {
         }
     });
 
+    // ==================== 飞书集成接口 ====================
+    app.get('/api/feishu/config', (req, res) => {
+        res.json({
+            appId: process.env.FEISHU_APP_ID,
+            redirectUri: process.env.FEISHU_REDIRECT_URI
+        });
+    });
+
+    app.post('/api/feishu/login', async (req, res) => {
+        const { code } = req.body;
+        const clientIp = getClientIp(req);
+
+        if (!code) {
+            return res.status(400).json({ error: 'Missing code' });
+        }
+
+        try {
+            // 1. 获取 app_access_token
+            const appAccessToken = await feishuService.getAppAccessToken();
+            
+            // 2. 获取用户信息
+            const feishuUser = await feishuService.getUserInfo(code, appAccessToken);
+            const { open_id, user_id, name } = feishuUser;
+
+            // --- 部门同步逻辑开始 ---
+            let groupId = null;
+            try {
+                if (user_id) {
+                    const userDetails = await feishuService.getUserDetails(user_id, appAccessToken);
+                    if (userDetails.department_ids && userDetails.department_ids.length > 0) {
+                        const deptId = userDetails.department_ids[0];
+                        const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
+                        if (deptInfo && deptInfo.name) {
+                            const deptName = deptInfo.name;
+                            // 查找或创建分组
+                            let group = await db.getGroupByName(deptName);
+                            if (!group) {
+                                group = await db.addGroup({ name: deptName });
+                                await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
+                            }
+                            groupId = group.id;
+                        }
+                    }
+                }
+            } catch (deptErr) {
+                console.warn('Failed to sync Feishu department:', deptErr.message);
+                // 部门同步失败不应阻断登录流程
+            }
+            // --- 部门同步逻辑结束 ---
+
+            // 3. 在数据库中查找用户
+            let user = await db.getUserByFeishuId(user_id, open_id);
+
+            // 检查飞书登录权限
+            if (user && user.feishuEnabled === 0) {
+                await logAction('飞书登录被拦截', 'user', user.id, user, { username: user.username, reason: '飞书登录权限已关闭' }, clientIp);
+                return res.status(403).json({ error: '您的账号已被禁止通过飞书登录，请联系管理员' });
+            }
+
+            // 4. 如果没找到，则创建一个新用户（考生角色）
+            if (!user) {
+                const newUserId = generateId('u_fs_');
+                user = await db.addUser({
+                    id: newUserId,
+                    username: name || `feishu_${open_id.substring(0, 8)}`,
+                    password: generateSecureToken().substring(0, 16), // 随机密码
+                    role: 'student',
+                    groupId: groupId, // 绑定同步的分组
+                    isFirstLogin: 0,
+                    feishuUserId: user_id,
+                    feishuOpenId: open_id
+                });
+                await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, group: groupId }, clientIp);
+            } else {
+                // 更新飞书信息
+                const needsUpdate = user.feishuUserId !== user_id || 
+                                   user.feishuOpenId !== open_id || 
+                                   user.isFirstLogin === 1 ||
+                                   (groupId && user.groupId !== groupId); // 同时也同步分组变更
+
+                if (needsUpdate) {
+                    user.feishuUserId = user_id;
+                    user.feishuOpenId = open_id;
+                    user.isFirstLogin = 0;
+                    if (groupId) user.groupId = groupId;
+                    
+                    await db.updateUser(user);
+                    await logAction('飞书登录同步用户信息', 'user', user.id, user, { username: name, open_id, group: groupId }, clientIp);
+                }
+            }
+
+            // 5. 生成 Session
+            const existingToken = await sessionStore.getUserToken(user.id);
+            if (existingToken) {
+                await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
+            }
+            const token = generateSecureToken();
+            await sessionStore.set(token, user, SESSION_EXPIRY_MS);
+            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS);
+            
+            await logAction('飞书登录成功', 'user', user.id, user, { username: user.username }, clientIp);
+            
+            res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
+        } catch (err) {
+            console.error('Feishu Login Error:', err);
+            await logAction('飞书登录失败', 'user', null, null, { error: err.message }, clientIp);
+            res.status(500).json({ error: '飞书认证失败' });
+        }
+    });
+
     app.post('/api/login', async (req, res) => {
         const { username, password } = req.body;
         const clientIp = getClientIp(req);
         const user = await db.login(username, password);
         if (user) {
             // 生成安全 Token
+            const existingToken = await sessionStore.getUserToken(user.id);
+            if (existingToken) {
+                await logAction('账号异地登录踢下线', 'user', user.id, user, { username }, clientIp);
+            }
             const token = generateSecureToken();
             await sessionStore.set(token, user, SESSION_EXPIRY_MS);
+            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS);
             // 记录登录成功日志
             await logAction('登录成功', 'user', user.id, user, { username }, clientIp);
             res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
@@ -708,12 +830,54 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.post('/api/records', async (req, res) => {
-        // 确保用户只能为自己提交记录
-        const record = { id: generateId('r_'), ...req.body, userId: req.user.id };
-        const result = await db.addRecord(record);
-        // 考试提交成功后，删除进度会话
-        await db.deleteExamSession(req.user.id, record.paperId);
-        res.json(result);
+        try {
+            const { paperId } = req.body || {};
+            if (!paperId) return res.status(400).json({ error: '缺少试卷ID' });
+
+            const userId = req.user.id;
+            const user = await db.getUserById(userId);
+            if (!user) return res.status(401).json({ error: '用户不存在' });
+
+            const paper = await db.getPaperById(paperId);
+            if (!paper || !paper.published) return res.status(404).json({ error: '试卷不存在或未发布' });
+
+            const inGroup = paper.targetGroups && paper.targetGroups.length > 0
+                ? paper.targetGroups.includes(user.groupId)
+                : false;
+            const inUsers = paper.targetUsers && paper.targetUsers.length > 0
+                ? paper.targetUsers.includes(user.id)
+                : false;
+            if (!inGroup && !inUsers) return res.status(403).json({ error: '无权提交该试卷成绩' });
+
+            if (paper.deadline) {
+                const now = new Date();
+                const deadline = new Date(paper.deadline.replace(' ', 'T'));
+                if (deadline < now) return res.status(400).json({ error: '考试已截止' });
+            }
+
+            const existing = await db.getRecordByUserAndPaper(user.id, paper.id);
+            if (existing) {
+                if (paper.publishDate && existing.submitDate) {
+                    const submitDate = new Date(existing.submitDate);
+                    const publishDate = new Date(paper.publishDate);
+                    if (submitDate >= publishDate) return res.status(400).json({ error: '您已提交过该考试' });
+                } else {
+                    return res.status(400).json({ error: '您已提交过该考试' });
+                }
+            }
+
+            const session = await db.getExamSession(user.id, paper.id);
+            if (!session) return res.status(400).json({ error: '考试会话不存在或已结束，请重新进入考试后提交' });
+
+            const record = { id: generateId('r_'), ...req.body, userId };
+            const result = await db.addRecord(record);
+
+            await db.deleteExamSession(userId, paper.id);
+            res.json(result);
+        } catch (e) {
+            console.error('提交考试记录失败:', e);
+            res.status(500).json({ error: '提交考试记录失败' });
+        }
     });
 
     app.get('/api/ranking/:paperId', async (req, res) => {
@@ -877,7 +1041,7 @@ module.exports = function initRoutes(app, context) {
 
         // 分页参数
         const page = parseInt(req.query.page) || 1;
-        const pageSize = parseInt(req.query.pageSize) || 20;
+        const pageSize = Math.min(200, parseInt(req.query.pageSize) || 20);
         filter.limit = pageSize;
         filter.offset = (page - 1) * pageSize;
 

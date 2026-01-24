@@ -136,7 +136,7 @@ function initNavigation() {
     document.getElementById('analysis-paper-select').addEventListener('change', function () {
         if (this.value) loadAdminAnalysis(this.value);
         else {
-            document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><p>请选择试卷以生成分析报告</p></div>';
+            document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><h3>请选择试卷以生成分析报告</h3></div>';
             document.getElementById('btn-clear-records').style.display = 'none';
         }
     });
@@ -489,6 +489,7 @@ function renderUsers() {
             <td style="${nameStyle}">
                 ${escapeHtml(u.username)} 
                 ${roleBadge}
+                ${u.feishuUserId ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px; font-family:monospace;" title="飞书用户">ID: ${escapeHtml(u.feishuUserId)}</div>` : ''}
             </td>
             <td>${escapeHtml(getGroupName(u.groupId))}</td>
             <td class="text-center">
@@ -505,6 +506,7 @@ function renderUsers() {
             <td style="${nameStyle}">
                 ${escapeHtml(u.username)} 
                 ${roleBadge}
+                ${u.feishuUserId ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px; font-family:monospace;" title="飞书用户">ID: ${escapeHtml(u.feishuUserId)}</div>` : ''}
             </td>
             <td>${escapeHtml(getGroupName(u.groupId))}</td>
             <td style="text-align: left; padding-left: 20px;"><div class="user-actions">${all || '<span class="text-muted">无</span>'}</div></td></tr>`;
@@ -578,17 +580,33 @@ function showAddUser() {
     `;
 
     openModal('添加用户',
-        `<div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name"></div>
-         <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" value="123456"></div>
-         <div class="form-group"><label class="form-label">角色</label>
-            <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
-                ${roleOptions}
-            </select>
+        `<div class="form-row">
+            <div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name"></div>
+            <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" value="123456"></div>
          </div>
-         <div class="form-group"><label class="form-label">分组</label>
-            <select class="form-select" id="user-group" disabled style="background-color: var(--bg-light); opacity: 0.7;">
-                ${groupOptions}
-            </select>
+         <div class="form-row">
+            <div class="form-group"><label class="form-label">角色</label>
+                <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                    ${roleOptions}
+                </select>
+            </div>
+            <div class="form-group"><label class="form-label">分组</label>
+                <select class="form-select" id="user-group" disabled style="background-color: var(--bg-light); opacity: 0.7;">
+                    ${groupOptions}
+                </select>
+            </div>
+         </div>
+         <div class="form-group" style="padding: 12px 16px; background: var(--bg-card-hover); border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+                <div style="font-size: 15px; color: var(--text-muted);">新用户默认允许飞书登录</div>
+                <div class="switch-group" style="padding: 0; flex-shrink: 0;">
+                    <label class="form-label" style="margin-bottom:0; font-size: 15px; white-space: nowrap;">允许飞书登录</label>
+                    <label class="switch">
+                        <input type="checkbox" id="user-feishu-enabled" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
          </div>
          <p style="font-size:12px; color:var(--text-muted); margin-top:-10px;">将在当前选中的分组下创建用户</p>`,
         '<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveUser()">保存</button>');
@@ -609,16 +627,42 @@ function showEditUser(id) {
     `;
 
     openModal('编辑用户',
-        `<div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name" value="${escapeHtml(user.username)}"></div>
-         <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" placeholder="留空则不修改密码"></div>
-         <div class="form-group"><label class="form-label">角色</label>
-            <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
-                ${roleOptions}
-            </select>
+        `<div class="form-row">
+            <div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name" value="${escapeHtml(user.username)}"></div>
+            <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" placeholder="留空则不修改密码"></div>
          </div>
-         <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
-           <option value="">未分组</option>
-           ${groups.map(g => `<option value="${g.id}" ${g.id === user.groupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}</select></div>`,
+         <div class="form-row">
+            <div class="form-group"><label class="form-label">角色</label>
+                <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                    ${roleOptions}
+                </select>
+            </div>
+            <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+              <option value="">未分组</option>
+              ${groups.map(g => `<option value="${g.id}" ${g.id === user.groupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}</select></div>
+         </div>
+         <div class="form-group" style="padding: 12px 16px; background: var(--bg-card-hover); border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 24px; align-items: center; flex: 1; min-width: 200px;">
+                    ${user.feishuUserId ? `
+                    <div style="display: flex; gap: 8px; font-size: 15px;">
+                        <span style="color: var(--text-muted); white-space: nowrap;">飞书ID:</span>
+                        <span style="font-family: monospace; color: var(--text-primary);">${escapeHtml(user.feishuUserId)}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; font-size: 15px;">
+                        <span style="color: var(--text-muted); white-space: nowrap;">部门ID:</span>
+                        <span style="font-family: monospace; color: var(--text-primary);">${user.groupId ? escapeHtml(user.groupId) : '<span style="color: var(--text-muted);">未同步</span>'}</span>
+                    </div>` : '<div style="font-size: 15px; color: var(--text-muted);">未绑定飞书账号</div>'}
+                </div>
+                <div class="switch-group" style="padding: 0; flex-shrink: 0;">
+                    <label class="form-label" style="margin-bottom:0; font-size: 15px; white-space: nowrap;">允许飞书登录</label>
+                    <label class="switch">
+                        <input type="checkbox" id="user-feishu-enabled" ${user.feishuEnabled !== 0 ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+         </div>`,
         '<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveUser()">更新</button>');
 }
 
@@ -627,6 +671,7 @@ async function saveUser() {
     const password = document.getElementById('user-pwd').value;
     const role = document.getElementById('user-role')?.value || 'student';
     const groupId = document.getElementById('user-group').value;
+    const feishuEnabled = document.getElementById('user-feishu-enabled').checked ? 1 : 0;
 
     if (!username) { showAlert('请输入用户名'); return; }
 
@@ -634,13 +679,13 @@ async function saveUser() {
         // 编辑模式
         const oldUser = cachedData.users.find(u => u.id === editingUserId);
         if (oldUser) {
-            const updateData = { ...oldUser, username, role, groupId };
+            const updateData = { ...oldUser, username, role, groupId, feishuEnabled };
             if (password) updateData.password = password; // 只有输入了密码才更新
             await Storage.updateUser(updateData);
         }
     } else {
         // 新增模式
-        await Storage.addUser({ username, password: password || '123456', role, groupId });
+        await Storage.addUser({ username, password: password || '123456', role, groupId, feishuEnabled });
     }
 
     closeModal();
@@ -2754,7 +2799,7 @@ function loadAdminAnalysisOptions() {
     const papers = cachedData.papers.filter(p => p.published);
     document.getElementById('analysis-paper-select').innerHTML = '<option value="">请选择要分析的试卷</option>' +
         papers.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-    document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><p>请选择试卷以生成分析报告</p></div>';
+    document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><h3>请选择试卷以生成分析报告</h3></div>';
     document.getElementById('btn-clear-records').style.display = 'none';
 }
 
@@ -3371,7 +3416,10 @@ function renderSystemLogs(logs) {
         } else if (log.details && typeof log.details === 'object') {
             const parts = [];
             if (log.details.username) parts.push('用户名: ' + log.details.username);
-            if (log.details.name) parts.push('名称: ' + log.details.name);
+            if (log.details.name) {
+                const nameLabel = log.target === 'user' ? '用户名: ' : '名称: ';
+                parts.push(nameLabel + log.details.name);
+            }
             if (log.details.type) parts.push('类型: ' + log.details.type);
             if (log.details.role) parts.push('角色: ' + log.details.role);
             if (log.details.dbType) parts.push('数据库: ' + log.details.dbType);
