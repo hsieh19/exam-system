@@ -67,9 +67,24 @@ class MemoryStore {
         return entry.token || null;
     }
 
-    async setUserToken(userId, token, ttlMs) {
+    async getUserTokenEntry(userId) {
+        const entry = this.userTokens.get(userId);
+        if (!entry) return null;
+        if (entry.expiresAt <= Date.now()) {
+            this.userTokens.delete(userId);
+            return null;
+        }
+        return { token: entry.token || null, ip: entry.ip || null, ua: entry.ua || null };
+    }
+
+    async setUserToken(userId, token, ttlMs, meta = null) {
         const expiresAt = Date.now() + ttlMs;
-        this.userTokens.set(userId, { token, expiresAt });
+        this.userTokens.set(userId, {
+            token,
+            expiresAt,
+            ip: meta && meta.ip ? meta.ip : null,
+            ua: meta && meta.ua ? meta.ua : null
+        });
     }
 
     async deleteUserToken(userId) {
@@ -128,11 +143,42 @@ class RedisStore {
     }
 
     async getUserToken(userId) {
-        return await this.client.get(`user_sess:${userId}`);
+        const raw = await this.client.get(`user_sess:${userId}`);
+        if (!raw) return null;
+        if (raw.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(raw);
+                return parsed && parsed.token ? parsed.token : null;
+            } catch (e) {
+                return null;
+            }
+        }
+        return raw;
     }
 
-    async setUserToken(userId, token, ttlMs) {
-        await this.client.set(`user_sess:${userId}`, token, { PX: ttlMs });
+    async getUserTokenEntry(userId) {
+        const raw = await this.client.get(`user_sess:${userId}`);
+        if (!raw) return null;
+        if (raw.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(raw);
+                return {
+                    token: parsed && parsed.token ? parsed.token : null,
+                    ip: parsed && parsed.ip ? parsed.ip : null,
+                    ua: parsed && parsed.ua ? parsed.ua : null
+                };
+            } catch (e) {
+                return null;
+            }
+        }
+        return { token: raw, ip: null, ua: null };
+    }
+
+    async setUserToken(userId, token, ttlMs, meta = null) {
+        const value = meta && (meta.ip || meta.ua)
+            ? JSON.stringify({ token, ip: meta.ip || null, ua: meta.ua || null })
+            : token;
+        await this.client.set(`user_sess:${userId}`, value, { PX: ttlMs });
     }
 
     async deleteUserToken(userId) {

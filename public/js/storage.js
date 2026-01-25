@@ -193,6 +193,12 @@ const Storage = {
   },
 
   getCurrentUser() {
+    const token = SafeStorage.get('auth_token');
+    if (!token) {
+      currentUser = null;
+      SafeStorage.remove('current_user');
+      return null;
+    }
     if (currentUser) return currentUser;
     const saved = SafeStorage.get('current_user');
     if (saved) {

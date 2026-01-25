@@ -427,6 +427,7 @@ module.exports = function initRoutes(app, context) {
     app.post('/api/feishu/login', feishuLoginLimiter, async (req, res) => {
         const { code } = req.body;
         const clientIp = getClientIp(req);
+        const userAgent = String(req.headers['user-agent'] || '');
 
         if (!code) {
             return res.status(400).json({ error: 'Missing code' });
@@ -508,15 +509,21 @@ module.exports = function initRoutes(app, context) {
             }
 
             // 5. 生成 Session
-            const existingToken = await sessionStore.getUserToken(user.id);
+            const existingEntry = sessionStore.getUserTokenEntry ? await sessionStore.getUserTokenEntry(user.id) : null;
+            const existingToken = existingEntry ? existingEntry.token : await sessionStore.getUserToken(user.id);
             if (existingToken) {
                 await sessionStore.delete(existingToken);
                 closeSseForUser(user.id);
-                await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
+                const isRemote = !!(existingEntry && existingEntry.ip && existingEntry.ua && (existingEntry.ip !== clientIp || existingEntry.ua !== userAgent));
+                if (isRemote) {
+                    await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
+                } else {
+                    await logAction('账号重新登录刷新会话', 'user', user.id, user, { username: user.username }, clientIp);
+                }
             }
             const token = generateSecureToken();
             await sessionStore.set(token, user, SESSION_EXPIRY_MS);
-            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS);
+            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS, { ip: clientIp, ua: userAgent });
             
             await logAction('飞书登录成功', 'user', user.id, user, { username: user.username }, clientIp);
             
@@ -531,18 +538,25 @@ module.exports = function initRoutes(app, context) {
     app.post('/api/login', loginLimiter, async (req, res) => {
         const { username, password } = req.body;
         const clientIp = getClientIp(req);
+        const userAgent = String(req.headers['user-agent'] || '');
         const user = await db.login(username, password);
         if (user) {
             // 生成安全 Token
-            const existingToken = await sessionStore.getUserToken(user.id);
+            const existingEntry = sessionStore.getUserTokenEntry ? await sessionStore.getUserTokenEntry(user.id) : null;
+            const existingToken = existingEntry ? existingEntry.token : await sessionStore.getUserToken(user.id);
             if (existingToken) {
                 await sessionStore.delete(existingToken);
                 closeSseForUser(user.id);
-                await logAction('账号异地登录踢下线', 'user', user.id, user, { username }, clientIp);
+                const isRemote = !!(existingEntry && existingEntry.ip && existingEntry.ua && (existingEntry.ip !== clientIp || existingEntry.ua !== userAgent));
+                if (isRemote) {
+                    await logAction('账号异地登录踢下线', 'user', user.id, user, { username }, clientIp);
+                } else {
+                    await logAction('账号重新登录刷新会话', 'user', user.id, user, { username }, clientIp);
+                }
             }
             const token = generateSecureToken();
             await sessionStore.set(token, user, SESSION_EXPIRY_MS);
-            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS);
+            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS, { ip: clientIp, ua: userAgent });
             // 记录登录成功日志
             await logAction('登录成功', 'user', user.id, user, { username }, clientIp);
             res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });

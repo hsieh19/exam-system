@@ -104,7 +104,15 @@ is_pm2_installed() {
 # 检查应用是否在 PM2 中运行
 is_app_in_pm2() {
     if is_pm2_installed; then
-        pm2 list | grep -q "exam-system"
+        pm2 describe exam-system >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+is_app_online_in_pm2() {
+    if is_pm2_installed; then
+        pm2 show exam-system 2>/dev/null | grep -E -q "status[[:space:]]*[:│][[:space:]]*online|status[[:space:]]+online"
         return $?
     fi
     return 1
@@ -392,10 +400,10 @@ start_app() {
         sync_env
     fi
 
-    if [ -f "$PID_FILE" ] || is_app_in_pm2; then
-        if is_app_in_pm2; then
-             echo -e "${YELLOW}服务已在 PM2 中运行${NC}"
-             return
+    if [ -f "$PID_FILE" ] || is_app_online_in_pm2; then
+        if is_app_online_in_pm2; then
+            echo -e "${YELLOW}服务已在 PM2 中运行${NC}"
+            return
         fi
         current_pid=$(cat "$PID_FILE")
         if ps -p "$current_pid" > /dev/null 2>&1; then
@@ -410,7 +418,13 @@ start_app() {
     
     if is_pm2_installed; then
         echo -e "${BLUE}检测到 PM2，将使用 ecosystem.config.js 启动集群模式...${NC}"
-        pm2 start ecosystem.config.js --env production
+        if is_app_in_pm2; then
+            pm2 reload ecosystem.config.js --env production --update-env \
+                || pm2 restart exam-system --update-env \
+                || (pm2 delete exam-system && pm2 start ecosystem.config.js --env production --update-env)
+        else
+            pm2 start ecosystem.config.js --env production --update-env
+        fi
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}服务已通过 PM2 启动成功!${NC}"
             if [ "$persist" = true ]; then
@@ -778,6 +792,7 @@ update_app() {
     [ -d "public" ] && cp -r public "$BACKUP_DIR/"
     [ -d "src" ] && cp -r src "$BACKUP_DIR/"
     [ -f "package.json" ] && cp package.json "$BACKUP_DIR/"
+    [ -f "ecosystem.config.js" ] && cp ecosystem.config.js "$BACKUP_DIR/"
     [ -f "run.sh" ] && cp run.sh "$BACKUP_DIR/"
     
     # 清理旧备份 (只保留最近 1 个)
@@ -808,6 +823,7 @@ update_app() {
     cp -rf "${EXTRACTED_DIR}public" ./
     cp -rf "${EXTRACTED_DIR}src" ./
     cp -f "${EXTRACTED_DIR}package.json" ./
+    [ -f "${EXTRACTED_DIR}ecosystem.config.js" ] && cp -f "${EXTRACTED_DIR}ecosystem.config.js" ./
     cp -f "${EXTRACTED_DIR}run.sh" ./
     [ -f "${EXTRACTED_DIR}.env.example" ] && cp -f "${EXTRACTED_DIR}.env.example" ./
     
@@ -876,6 +892,10 @@ restore_app() {
     
     if [ -f "${LATEST_BACKUP}/package.json" ]; then
         cp "${LATEST_BACKUP}/package.json" ./
+    fi
+
+    if [ -f "${LATEST_BACKUP}/ecosystem.config.js" ]; then
+        cp "${LATEST_BACKUP}/ecosystem.config.js" ./
     fi
     
     # 注意：通常还原功能本身就在 run.sh 中运行，直接覆盖运行中的脚本可能有风险。
