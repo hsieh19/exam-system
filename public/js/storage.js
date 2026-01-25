@@ -1,6 +1,7 @@
 const API_BASE = '';
 let currentUser = null;
-const SESSION_ONLY_KEYS = new Set(['auth_token']);
+const isFeishu = /Lark|Feishu|LarkWebView|FeishuWebView/i.test(navigator.userAgent);
+const SESSION_ONLY_KEYS = isFeishu ? new Set([]) : new Set(['auth_token']);
 const SafeStorage = {
   get(key) {
     if (SESSION_ONLY_KEYS.has(key)) {

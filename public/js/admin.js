@@ -401,16 +401,24 @@ function renderUsers() {
     const groups = cachedData.groups;
     const currentUser = Storage.getCurrentUser();
     const isMobile = window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : (window.innerWidth <= 768);
-    const getGroupName = (gid) => groups.find(g => g.id === gid)?.name || '-';
+    const getGroupName = (gid) => {
+        if (!gid) return '-';
+        const ids = String(gid).split(',');
+        return ids.map(id => groups.find(g => g.id === id)?.name || '-').join(', ');
+    };
 
     // 优先处理搜索（全局搜索），若无搜索词则按分组过滤
     if (query) {
         users = users.filter(u => {
-            const groupName = getGroupName(u.groupId).toLowerCase();
-            return u.username.toLowerCase().includes(query) || groupName.includes(query);
+            const groupNameStr = getGroupName(u.groupId).toLowerCase();
+            return u.username.toLowerCase().includes(query) || groupNameStr.includes(query);
         });
     } else if (selectedGroupId) {
-        users = users.filter(u => u.groupId === selectedGroupId);
+        users = users.filter(u => {
+            if (!u.groupId) return false;
+            const ids = String(u.groupId).split(',');
+            return ids.includes(selectedGroupId);
+        });
     }
 
     const html = users.length ? (isMobile
@@ -591,14 +599,23 @@ function showAddUser() {
                 </select>
             </div>
             <div class="form-group"><label class="form-label">分组</label>
-                <select class="form-select" id="user-group" disabled style="background-color: var(--bg-light); opacity: 0.7;">
+                <select class="form-select" id="user-group" onchange="document.getElementById('user-dept-id').textContent = this.value || '未分配'" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
                     ${groupOptions}
                 </select>
             </div>
          </div>
          <div class="form-group" style="padding: 12px 16px; background: var(--bg-card-hover); border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px;">
-                <div style="font-size: 15px; color: var(--text-muted);">新用户默认允许飞书登录</div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 24px; align-items: center; flex: 1; min-width: 200px;">
+                    <div style="display: flex; gap: 8px; align-items: center; font-size: 15px;">
+                        <span style="color: var(--text-muted); white-space: nowrap;">飞书ID:</span>
+                        <input type="text" id="user-feishu-id" class="form-input" style="height: 28px; padding: 0 8px; font-size: 13px; width: 120px;" placeholder="可选">
+                    </div>
+                    <div style="display: flex; gap: 8px; font-size: 15px;">
+                        <span style="color: var(--text-muted); white-space: nowrap;">部门ID:</span>
+                        <span id="user-dept-id" style="font-family: monospace; color: var(--text-primary);">${selectedGroupId || '未分配'}</span>
+                    </div>
+                </div>
                 <div class="switch-group" style="padding: 0; flex-shrink: 0;">
                     <label class="form-label" style="margin-bottom:0; font-size: 15px; white-space: nowrap;">允许飞书登录</label>
                     <label class="switch">
@@ -607,8 +624,7 @@ function showAddUser() {
                     </label>
                 </div>
             </div>
-         </div>
-         <p style="font-size:12px; color:var(--text-muted); margin-top:-10px;">将在当前选中的分组下创建用户</p>`,
+         </div>`,
         '<button class="btn btn-secondary" onclick="closeModal()">取消</button><button class="btn btn-primary" onclick="saveUser()">保存</button>');
 }
 
@@ -619,6 +635,9 @@ function showEditUser(id) {
 
     const currentUser = Storage.getCurrentUser();
     const groups = cachedData.groups;
+    const isFeishuUser = !!user.feishuUserId;
+    const isSuperAdmin = currentUser.role === 'super_admin';
+    const canEditSensitive = isSuperAdmin || !isFeishuUser;
 
     const roleOptions = `
         <option value="student" ${user.role === 'student' ? 'selected' : ''}>考生</option>
@@ -626,33 +645,50 @@ function showEditUser(id) {
         ${user.role === 'super_admin' ? '<option value="super_admin" selected>超级管理员</option>' : ''}
     `;
 
+    const userGroups = user.groupId ? String(user.groupId).split(',') : [];
+    const groupOptions = groups.map(g => `
+        <option value="${g.id}" ${userGroups.includes(g.id) ? 'selected' : ''}>${escapeHtml(g.name)}</option>
+    `).join('');
+
     openModal('编辑用户',
         `<div class="form-row">
-            <div class="form-group"><label class="form-label">用户名</label><input type="text" class="form-input" id="user-name" value="${escapeHtml(user.username)}"></div>
-            <div class="form-group"><label class="form-label">密码</label><input type="text" class="form-input" id="user-pwd" placeholder="留空则不修改密码"></div>
+            <div class="form-group">
+                <label class="form-label">用户名</label>
+                <input type="text" class="form-input" id="user-name" value="${escapeHtml(user.username)}" ${isFeishuUser ? 'disabled' : ''}>
+                ${isFeishuUser ? '<small style="color:var(--text-muted)">飞书用户用户名禁止修改</small>' : ''}
+            </div>
+            <div class="form-group">
+                <label class="form-label">密码</label>
+                <input type="text" class="form-input" id="user-pwd" placeholder="${isFeishuUser ? '禁止修改飞书用户密码' : '留空则不修改密码'}" ${isFeishuUser ? 'disabled' : ''}>
+            </div>
          </div>
          <div class="form-row">
             <div class="form-group"><label class="form-label">角色</label>
-                <select class="form-select" id="user-role" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                <select class="form-select" id="user-role" ${!canEditSensitive || currentUser.role !== 'super_admin' ? 'disabled' : ''}>
                     ${roleOptions}
                 </select>
             </div>
-            <div class="form-group"><label class="form-label">分组</label><select class="form-select" id="user-group" ${currentUser.role !== 'super_admin' ? 'disabled' : ''}>
-              <option value="">未分组</option>
-              ${groups.map(g => `<option value="${g.id}" ${g.id === user.groupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('')}</select></div>
+            <div class="form-group"><label class="form-label">所属分组</label>
+                <select class="form-select" id="user-group" onchange="document.getElementById('user-dept-id').textContent = this.value || '未分配'" ${!canEditSensitive || currentUser.role !== 'super_admin' ? 'disabled' : ''}>
+                    <option value="">未分配分组</option>
+                    ${groupOptions}
+                </select>
+            </div>
          </div>
          <div class="form-group" style="padding: 12px 16px; background: var(--bg-card-hover); border-radius: var(--radius-md); border: 1px solid var(--border); margin-bottom: 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
                 <div style="display: flex; gap: 24px; align-items: center; flex: 1; min-width: 200px;">
-                    ${user.feishuUserId ? `
-                    <div style="display: flex; gap: 8px; font-size: 15px;">
+                    <div style="display: flex; gap: 8px; align-items: center; font-size: 15px;">
                         <span style="color: var(--text-muted); white-space: nowrap;">飞书ID:</span>
-                        <span style="font-family: monospace; color: var(--text-primary);">${escapeHtml(user.feishuUserId)}</span>
+                        ${user.feishuUserId ? 
+                            `<span style="font-family: monospace; color: var(--text-primary);">${escapeHtml(user.feishuUserId)}</span>` : 
+                            `<input type="text" id="user-feishu-id" class="form-input" style="height: 28px; padding: 0 8px; font-size: 13px; width: 120px;" placeholder="可选">`
+                        }
                     </div>
                     <div style="display: flex; gap: 8px; font-size: 15px;">
                         <span style="color: var(--text-muted); white-space: nowrap;">部门ID:</span>
-                        <span style="font-family: monospace; color: var(--text-primary);">${user.groupId ? escapeHtml(user.groupId) : '<span style="color: var(--text-muted);">未同步</span>'}</span>
-                    </div>` : '<div style="font-size: 15px; color: var(--text-muted);">未绑定飞书账号</div>'}
+                        <span id="user-dept-id" style="font-family: monospace; color: var(--text-primary);">${user.groupId ? escapeHtml(user.groupId) : '未分配'}</span>
+                    </div>
                 </div>
                 <div class="switch-group" style="padding: 0; flex-shrink: 0;">
                     <label class="form-label" style="margin-bottom:0; font-size: 15px; white-space: nowrap;">允许飞书登录</label>
@@ -670,8 +706,9 @@ async function saveUser() {
     const username = document.getElementById('user-name').value.trim();
     const password = document.getElementById('user-pwd').value;
     const role = document.getElementById('user-role')?.value || 'student';
-    const groupId = document.getElementById('user-group').value;
+    const groupId = document.getElementById('user-group')?.value || '';
     const feishuEnabled = document.getElementById('user-feishu-enabled').checked ? 1 : 0;
+    const feishuUserId = document.getElementById('user-feishu-id')?.value.trim() || null;
 
     if (!username) { showAlert('请输入用户名'); return; }
 
@@ -680,12 +717,13 @@ async function saveUser() {
         const oldUser = cachedData.users.find(u => u.id === editingUserId);
         if (oldUser) {
             const updateData = { ...oldUser, username, role, groupId, feishuEnabled };
+            if (feishuUserId) updateData.feishuUserId = feishuUserId;
             if (password) updateData.password = password; // 只有输入了密码才更新
             await Storage.updateUser(updateData);
         }
     } else {
         // 新增模式
-        await Storage.addUser({ username, password: password || '123456', role, groupId, feishuEnabled });
+        await Storage.addUser({ username, password: password || '123456', role, groupId, feishuEnabled, feishuUserId });
     }
 
     closeModal();

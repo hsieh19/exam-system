@@ -331,6 +331,13 @@ module.exports = function initRoutes(app, context) {
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
 
         const updateData = req.body;
+
+        // 新增逻辑：如果是飞书用户，禁止任何人（包括超管）修改用户名和密码
+        if (targetUser.feishuUserId) {
+            delete updateData.username;
+            delete updateData.password;
+        }
+
         // 权限检查
         if (req.user.role !== 'super_admin') {
             // 不能修改超管
@@ -340,7 +347,8 @@ module.exports = function initRoutes(app, context) {
             if (targetUser.groupId !== req.user.groupId) {
                 return res.status(403).json({ error: '无权操作该用户' });
             }
-            // 分组管理员不能修改角色和分组
+
+            // 非超管禁止修改角色和分组
             delete updateData.role;
             delete updateData.groupId;
         }
@@ -350,7 +358,8 @@ module.exports = function initRoutes(app, context) {
             delete updateData.role;
         }
 
-        const user = { ...updateData, id: req.params.id };
+        // 修复：将现有用户信息与更新信息合并，确保缺失字段（如被 delete 的 role）能从原数据中补齐
+        const user = { ...targetUser, ...updateData, id: req.params.id };
         const result = await db.updateUser(user);
         // 记录日志
         await logAction('更新用户', 'user', req.params.id, req.user, { username: updateData.username }, getClientIp(req));
@@ -361,6 +370,12 @@ module.exports = function initRoutes(app, context) {
     app.post('/api/change-password', async (req, res) => {
         const { oldPassword, newPassword } = req.body;
         const userId = req.user.id;
+
+        // 禁止飞书用户（且非超管）修改自己的密码
+        if (req.user.feishuUserId && req.user.role !== 'super_admin') {
+            return res.status(403).json({ error: '飞书用户请通过飞书账号登录，无需修改密码' });
+        }
+
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
 
         // 验证新密码强度 (默认管理员跳过强度校验)
@@ -442,22 +457,25 @@ module.exports = function initRoutes(app, context) {
             const { open_id, user_id, name } = feishuUser;
 
             // --- 部门同步逻辑开始 ---
-            let groupId = null;
+            let groupIds = [];
             try {
                 if (user_id) {
                     const userDetails = await feishuService.getUserDetails(user_id, appAccessToken);
                     if (userDetails.department_ids && userDetails.department_ids.length > 0) {
-                        const deptId = userDetails.department_ids[0];
-                        const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
-                        if (deptInfo && deptInfo.name) {
-                            const deptName = deptInfo.name;
-                            // 查找或创建分组
-                            let group = await db.getGroupByName(deptName);
-                            if (!group) {
-                                group = await db.addGroup({ name: deptName });
-                                await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
+                        for (const deptId of userDetails.department_ids) {
+                            const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
+                            if (deptInfo && deptInfo.name) {
+                                const deptName = deptInfo.name;
+                                // 查找或创建分组
+                                let group = await db.getGroupByName(deptName);
+                                if (!group) {
+                                    group = await db.addGroup({ name: deptName });
+                                    await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
+                                }
+                                if (!groupIds.includes(group.id)) {
+                                    groupIds.push(group.id);
+                                }
                             }
-                            groupId = group.id;
                         }
                     }
                 }
@@ -465,6 +483,7 @@ module.exports = function initRoutes(app, context) {
                 console.warn('Failed to sync Feishu department:', deptErr.message);
                 // 部门同步失败不应阻断登录流程
             }
+            const finalGroupIdStr = groupIds.length > 0 ? groupIds.join(',') : null;
             // --- 部门同步逻辑结束 ---
 
             // 3. 在数据库中查找用户
@@ -484,27 +503,27 @@ module.exports = function initRoutes(app, context) {
                     username: name || `feishu_${open_id.substring(0, 8)}`,
                     password: generateSecureToken().substring(0, 16), // 随机密码
                     role: 'student',
-                    groupId: groupId, // 绑定同步的分组
+                    groupId: finalGroupIdStr, // 绑定同步的多个分组
                     isFirstLogin: 0,
                     feishuUserId: user_id,
                     feishuOpenId: open_id
                 });
-                await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, group: groupId }, clientIp);
+                await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
             } else {
                 // 更新飞书信息
                 const needsUpdate = user.feishuUserId !== user_id || 
                                    user.feishuOpenId !== open_id || 
                                    user.isFirstLogin === 1 ||
-                                   (groupId && user.groupId !== groupId); // 同时也同步分组变更
+                                   (finalGroupIdStr && user.groupId !== finalGroupIdStr); // 同时也同步多分组变更
 
                 if (needsUpdate) {
                     user.feishuUserId = user_id;
                     user.feishuOpenId = open_id;
                     user.isFirstLogin = 0;
-                    if (groupId) user.groupId = groupId;
+                    if (finalGroupIdStr) user.groupId = finalGroupIdStr;
                     
                     await db.updateUser(user);
-                    await logAction('飞书登录同步用户信息', 'user', user.id, user, { username: name, open_id, group: groupId }, clientIp);
+                    await logAction('飞书登录同步用户信息', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
                 }
             }
 

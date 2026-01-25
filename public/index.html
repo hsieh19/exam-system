@@ -10,7 +10,7 @@
 </head>
 
 <body>
-  <div class="login-container">
+  <div class="login-container" id="main-container" style="opacity: 0; transition: opacity 0.2s ease-in-out;">
     <div class="login-card">
       <div class="login-logo">
         <h1>企业考试系统</h1>
@@ -89,7 +89,38 @@
   <script src="js/auth.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
+      const container = document.getElementById('main-container');
+
+      // 1. 立即检查是否已登录，优先重定向，避免显示登录界面
+      try {
+        const currentUser = Storage.getCurrentUser();
+        if (currentUser) {
+          if (currentUser.isFirstLogin) {
+            // 如果需要修改密码，显示修改密码表单
+            if (container) container.style.opacity = '1';
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('change-password-form').style.display = 'block';
+            if (!window._oldPassword) {
+              Storage.logout();
+              location.reload();
+            }
+          } else {
+            if (currentUser.role === 'super_admin' || currentUser.role === 'group_admin') {
+              window.location.href = 'admin.html';
+            } else {
+              window.location.href = 'student.html';
+            }
+          }
+          return;
+        }
+      } catch (e) {
+        console.error('Initial session check failed:', e);
+      }
+
+      // 2. 未登录，显示界面并继续初始化
+      if (container) container.style.opacity = '1';
       console.log('DOM loaded, initializing login logic...');
+      
       try {
         const reason = SafeStorage.get('logout_reason');
         if (reason) {
@@ -289,34 +320,6 @@
       }
 
       initFeishuLogin();
-
-      // 检查是否已登录
-      try {
-        const currentUser = Storage.getCurrentUser();
-        if (currentUser) {
-          if (currentUser.isFirstLogin) {
-            // 如果需要修改密码，显示修改密码表单
-            document.getElementById('login-form').style.display = 'none';
-            document.getElementById('change-password-form').style.display = 'block';
-            // 注意：此时我们没有 _oldPassword，用户可能需要重新登录来获取它，
-            // 或者我们可以提示用户重新登录。
-            // 为了简单起见，如果从其他页面跳回来且没有 _oldPassword，我们强制用户重新登录
-            if (!window._oldPassword) {
-              Storage.logout();
-              location.reload();
-            }
-          } else {
-            if (currentUser.role === 'super_admin' || currentUser.role === 'group_admin') {
-              window.location.href = 'admin.html';
-            } else {
-              window.location.href = 'student.html';
-            }
-          }
-          return;
-        }
-      } catch (e) {
-        console.error('Error checking current user:', e);
-      }
 
       const loginBtn = document.getElementById('login-btn');
       if (!loginBtn) {

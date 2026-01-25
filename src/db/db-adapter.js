@@ -228,7 +228,7 @@ const sqliteAdapter = {
             stmt.free();
             return results;
         } catch (e) {
-            console.error('SQLite query error:', e.message);
+            console.error('SQLite query error:', e.message || e);
             return [];
         }
     },
@@ -238,7 +238,7 @@ const sqliteAdapter = {
             this.db.run(sql, params);
             this.save();
         } catch (e) {
-            console.error('SQLite run error:', e.message);
+            console.error('SQLite run error:', e.message || e);
         }
     },
 
@@ -464,7 +464,7 @@ const mysqlAdapter = {
             const [rows] = await this.pool.execute(sql, params);
             return rows;
         } catch (e) {
-            console.error('MySQL query error:', e.message);
+            console.error('MySQL query error:', e.message || e);
             return [];
         }
     },
@@ -473,7 +473,7 @@ const mysqlAdapter = {
         try {
             await this.pool.execute(sql, params);
         } catch (e) {
-            console.error('MySQL run error:', e.message);
+            console.error('MySQL run error:', e.message || e);
         }
     },
 
@@ -707,7 +707,7 @@ const postgresAdapter = {
             const result = await this.pool.query(pgSql, params);
             return result.rows;
         } catch (e) {
-            console.error('PostgreSQL query error:', e.message);
+            console.error('PostgreSQL query error:', e.message || e);
             return [];
         }
     },
@@ -720,7 +720,7 @@ const postgresAdapter = {
 
             await this.pool.query(pgSql, params);
         } catch (e) {
-            console.error('PostgreSQL run error:', e.message);
+            console.error('PostgreSQL run error:', e.message || e);
         }
     },
 
@@ -913,8 +913,12 @@ module.exports = {
         const conditions = [];
 
         if (filter.groupId !== undefined) {
-            conditions.push("groupId = ?");
+            // 支持多分组过滤：如果是单分组则直接等于，如果是多分组则使用 LIKE
+            conditions.push("(groupId = ? OR groupId LIKE ? OR groupId LIKE ? OR groupId LIKE ?)");
             params.push(filter.groupId);
+            params.push(filter.groupId + ',%');   // 开头
+            params.push('%,' + filter.groupId + ',%'); // 中间
+            params.push('%,' + filter.groupId);     // 结尾
         }
 
         if (conditions.length > 0) {
