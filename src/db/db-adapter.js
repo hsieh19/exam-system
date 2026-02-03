@@ -107,6 +107,7 @@ const sqliteAdapter = {
                 category TEXT,
                 deviceType TEXT,
                 groupId TEXT,
+                must INTEGER DEFAULT 0,
                 updatedAt TEXT
             );
             CREATE TABLE IF NOT EXISTS papers (
@@ -118,9 +119,13 @@ const sqliteAdapter = {
                 createDate TEXT,
                 targetGroups TEXT,
                 targetUsers TEXT,
+                startTime TEXT,
                 deadline TEXT,
                 groupId TEXT,
-                creatorId TEXT
+                creatorId TEXT,
+                shuffleQuestions INTEGER DEFAULT 0,
+                shuffleOptions INTEGER DEFAULT 0,
+                passScore INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS records (
                 id TEXT PRIMARY KEY,
@@ -136,6 +141,7 @@ const sqliteAdapter = {
                 paperId TEXT NOT NULL,
                 targetGroups TEXT,
                 targetUsers TEXT,
+                startTime TEXT,
                 deadline TEXT,
                 pushDate TEXT
             );
@@ -189,13 +195,19 @@ const sqliteAdapter = {
         };
 
         checkAndAddColumn('questions', 'updatedAt', 'TEXT');
+        checkAndAddColumn('questions', 'must', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'published', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('papers', 'startTime', 'TEXT');
         checkAndAddColumn('papers', 'publishDate', 'TEXT');
+        checkAndAddColumn('papers', 'shuffleQuestions', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('papers', 'shuffleOptions', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('papers', 'passScore', 'INTEGER DEFAULT 0');
         checkAndAddColumn('users', 'isFirstLogin', 'INTEGER DEFAULT 1');
         checkAndAddColumn('users', 'feishuUserId', 'TEXT');
         checkAndAddColumn('users', 'feishuOpenId', 'TEXT');
         checkAndAddColumn('users', 'feishuEnabled', 'INTEGER DEFAULT 1');
         checkAndAddColumn('exam_sessions', 'lastQuestionStartTime', 'TEXT');
+        checkAndAddColumn('push_logs', 'startTime', 'TEXT');
 
         // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
@@ -325,9 +337,13 @@ const mysqlAdapter = {
                 createDate VARCHAR(50),
                 targetGroups TEXT,
                 targetUsers TEXT,
+                startTime VARCHAR(50),
                 deadline VARCHAR(50),
                 groupId VARCHAR(255),
-                creatorId VARCHAR(255)
+                creatorId VARCHAR(255),
+                shuffleQuestions TINYINT DEFAULT 0,
+                shuffleOptions TINYINT DEFAULT 0,
+                passScore INT DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -343,6 +359,7 @@ const mysqlAdapter = {
                 paperId VARCHAR(255) NOT NULL,
                 targetGroups TEXT,
                 targetUsers TEXT,
+                startTime VARCHAR(50),
                 deadline VARCHAR(50),
                 pushDate VARCHAR(50)
             )`,
@@ -383,8 +400,9 @@ const mysqlAdapter = {
             try {
                 await this.pool.execute(sql);
             } catch (e) {
-                // Ignore error if index already exists
-                if (!e.message.includes('already exists') && !e.message.includes('Duplicate key name')) {
+                if (!e.message.includes('already exists') &&
+                    !e.message.includes('Duplicate key name') &&
+                    !e.message.includes('Duplicate column name')) {
                     console.error('Error creating table/index:', e.message);
                 }
             }
@@ -548,7 +566,10 @@ const postgresAdapter = {
                 "targetUsers" TEXT,
                 deadline VARCHAR(50),
                 "groupId" VARCHAR(255),
-                "creatorId" VARCHAR(255)
+                "creatorId" VARCHAR(255),
+                "shuffleQuestions" INTEGER DEFAULT 0,
+                "shuffleOptions" INTEGER DEFAULT 0,
+                "passScore" INTEGER DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -1032,20 +1053,21 @@ module.exports = {
         return rows.map(q => ({
             ...q,
             options: q.options ? JSON.parse(q.options) : [],
-            answer: q.answer ? JSON.parse(q.answer) : ''
+            answer: q.answer ? JSON.parse(q.answer) : '',
+            must: q.must == null ? 0 : Number(q.must)
         }));
     },
     addQuestion: async (q) => {
         const id = q.id || generateId('q_');
         const now = new Date().toISOString();
-        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, now]);
+        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId, must, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now]);
         return { id, ...q, updatedAt: now };
     },
     updateQuestion: async (q) => {
         const now = new Date().toISOString();
-        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=?, updatedAt=? WHERE id=?",
-            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, now, q.id]);
+        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=?, must=?, updatedAt=? WHERE id=?",
+            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now, q.id]);
         return { ...q, updatedAt: now };
     },
     deleteQuestion: async (id) => {
@@ -1087,7 +1109,10 @@ module.exports = {
             questions: p.questions ? JSON.parse(p.questions) : {},
             rules: p.rules ? JSON.parse(p.rules) : [],
             targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
-            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : []
+            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : [],
+            shuffleQuestions: !!p.shuffleQuestions,
+            shuffleOptions: !!p.shuffleOptions,
+            passScore: p.passScore == null ? 0 : Number(p.passScore)
         }));
     },
     getPaperById: async (id) => {
@@ -1099,24 +1124,31 @@ module.exports = {
             questions: p.questions ? JSON.parse(p.questions) : {},
             rules: p.rules ? JSON.parse(p.rules) : [],
             targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
-            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : []
+            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : [],
+            shuffleQuestions: !!p.shuffleQuestions,
+            shuffleOptions: !!p.shuffleOptions,
+            passScore: p.passScore == null ? 0 : Number(p.passScore)
         };
     },
     addPaper: async (paper) => {
         const id = paper.id || generateId('p_');
-        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, deadline, groupId, creatorId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, startTime, deadline, groupId, creatorId, shuffleQuestions, shuffleOptions, passScore) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
                 paper.createDate || new Date().toISOString(),
                 JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
-                paper.deadline || null, paper.groupId || null, paper.creatorId || null]);
+                paper.startTime || null, paper.deadline || null, paper.groupId || null, paper.creatorId || null,
+                paper.shuffleQuestions ? 1 : 0, paper.shuffleOptions ? 1 : 0,
+                paper.passScore == null ? 0 : Number(paper.passScore)]);
         return { id, ...paper };
     },
     updatePaper: async (paper) => {
-        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, deadline=?, groupId=?, creatorId=?, published=?, publishDate=?, createDate=? WHERE id=?",
+        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, startTime=?, deadline=?, groupId=?, creatorId=?, published=?, publishDate=?, createDate=?, shuffleQuestions=?, shuffleOptions=?, passScore=? WHERE id=?",
             [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
             JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
-            paper.deadline || null, paper.groupId || null, paper.creatorId || null, 
-            paper.published ? 1 : 0, paper.publishDate || null, paper.createDate || null, paper.id]);
+            paper.startTime || null, paper.deadline || null, paper.groupId || null, paper.creatorId || null, 
+            paper.published ? 1 : 0, paper.publishDate || null, paper.createDate || null,
+            paper.shuffleQuestions ? 1 : 0, paper.shuffleOptions ? 1 : 0,
+            paper.passScore == null ? 0 : Number(paper.passScore), paper.id]);
         return paper;
     },
     deletePaper: async (id) => {
@@ -1202,9 +1234,9 @@ module.exports = {
     addPushLog: async (log) => {
         const id = log.id || generateId('pl_');
         const pushTime = log.pushTime || new Date().toISOString();
-        await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, startTime, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [id, log.paperId, JSON.stringify(log.targetGroups || []), JSON.stringify(log.targetUsers || []),
-                log.deadline || null, pushTime]);
+                log.startTime || null, log.deadline || null, pushTime]);
         return { id, ...log, pushTime };
     },
     getPushLogsByPaper: async (paperId) => {

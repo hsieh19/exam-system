@@ -370,11 +370,11 @@ const Storage = {
     }).then(r => r.json());
   },
 
-  publishPaper(paperId, targetGroups, targetUsers, deadline) {
+  publishPaper(paperId, targetGroups, targetUsers, startTime, deadline) {
     return authFetch(`${API_BASE}/api/papers/${paperId}/publish`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetGroups, targetUsers, deadline })
+      body: JSON.stringify({ targetGroups, targetUsers, startTime, deadline })
     }).then(r => r.json());
   },
 

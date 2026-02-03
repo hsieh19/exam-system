@@ -6,6 +6,16 @@ let lastQuestionStartTime = null;
 
 const TYPE_NAMES = { single: '单选题', multiple: '多选题', judge: '判断题' };
 
+function hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const chr = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + chr;
+        hash |= 0;
+    }
+    return hash;
+}
+
 document.addEventListener('DOMContentLoaded', async function () {
     user = Auth.checkStudent();
     if (!user) return;
@@ -51,6 +61,50 @@ document.addEventListener('DOMContentLoaded', async function () {
 });
 
 async function initExam() {
+    if (paper.shuffleQuestions) {
+        allQuestions = [...allQuestions].sort((a, b) => {
+            const ha = hashString(user.id + a.id);
+            const hb = hashString(user.id + b.id);
+            if (ha === hb) return a.id.localeCompare(b.id);
+            return ha - hb;
+        });
+    }
+
+    if (paper.shuffleOptions) {
+        allQuestions = allQuestions.map(q => {
+            if (q.type === 'judge' || !Array.isArray(q.options) || q.options.length === 0) return q;
+            const indices = q.options.map((_, idx) => idx);
+            indices.sort((a, b) => {
+                const ha = hashString(user.id + q.id + String(a));
+                const hb = hashString(user.id + q.id + String(b));
+                return ha - hb;
+            });
+            const options = indices.map(i => q.options[i]);
+            const letterMap = {};
+            indices.forEach((origIdx, pos) => {
+                const origLetter = 'ABCDEFGH'[origIdx];
+                const newLetter = 'ABCDEFGH'[pos];
+                letterMap[origLetter] = newLetter;
+            });
+            const mapAnswer = (answer) => {
+                if (!answer) return answer;
+                if (Array.isArray(answer)) {
+                    return answer.map(a => letterMap[a] || a);
+                }
+                if (typeof answer === 'string') {
+                    const parts = answer.split(/[,，]/).map(a => a.trim()).filter(a => a);
+                    if (parts.length > 1) {
+                        return parts.map(a => letterMap[a] || a);
+                    }
+                    return letterMap[answer] || answer;
+                }
+                return answer;
+            };
+            const answerShuffled = mapAnswer(q.answer);
+            return { ...q, options, answerShuffled };
+        });
+    }
+
     // 构建规则映射
     if (paper.rules && paper.rules.length) {
         paper.rules.forEach(rule => {
@@ -244,7 +298,7 @@ async function submitExam() {
 
     allQuestions.forEach(q => {
         const userAnswer = userAnswers[q.id];
-        const correctAnswer = q.answer;
+        const correctAnswer = q.answerShuffled != null ? q.answerShuffled : q.answer;
         const config = getQuestionConfig(q);
 
         if (!userAnswer) return;

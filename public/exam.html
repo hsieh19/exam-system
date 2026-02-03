@@ -4,6 +4,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('exam-system-theme') || 'dark';
+                if (theme !== 'dark') {
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+            } catch (e) { }
+        })();
+    </script>
     <title>企业考试系统 - 考试中</title>
     <link rel="stylesheet" href="css/style.css?v=3">
     <link

@@ -804,7 +804,7 @@ module.exports = function initRoutes(app, context) {
         const paper = {
             ...body,
             id: generateId('p_'),
-            createDate: new Date().toISOString().split('T')[0],
+            createDate: new Date().toISOString(),
             creatorId: req.user.id,
             groupId: req.user.groupId,
         };
@@ -828,9 +828,10 @@ module.exports = function initRoutes(app, context) {
         }
 
         const paper = { 
+            ...existing,
             ...req.body, 
             id: req.params.id,
-            createDate: new Date().toISOString() // 编辑保存时更新创建时间
+            createDate: existing.createDate || new Date().toISOString()
         };
         
         if (req.user.role !== 'super_admin') {
@@ -857,6 +858,7 @@ module.exports = function initRoutes(app, context) {
 
         let targetGroups = req.body.targetGroups || [];
         const targetUsers = req.body.targetUsers || [];
+        const startTime = req.body.startTime;
         const deadline = req.body.deadline;
         const pushTime = new Date().toISOString();
 
@@ -871,6 +873,7 @@ module.exports = function initRoutes(app, context) {
             published: true,
             targetGroups,
             targetUsers,
+            startTime,
             deadline,
             publishDate: pushTime
         };
@@ -883,6 +886,7 @@ module.exports = function initRoutes(app, context) {
             pushTime,
             targetGroups,
             targetUsers,
+            startTime,
             deadline
         });
 
@@ -937,37 +941,30 @@ module.exports = function initRoutes(app, context) {
         const availablePromises = papers.map(async p => {
             if (!p.published) return null;
 
-            // 检查是否在目标组或目标用户中
             const isInGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
             const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
             if (!isInGroup && !isTargetUser) return null;
 
-            // 如果有截止日期，检查是否过期
-            if (p.deadline) {
-                const now = new Date();
-                const deadline = new Date(p.deadline.replace(' ', 'T'));
-                if (deadline < now) return null;
-            }
-
-            // 检查用户是否已参加过考试
             const record = await db.getRecordByUserAndPaper(user.id, p.id);
             if (record) {
-                // 如果已提交过，检查最后提交时间是否早于最新发布时间
-                // 如果是，说明是重新推送的，应该允许再次考试
                 if (p.publishDate && record.submitDate) {
                     const submitDate = new Date(record.submitDate);
                     const publishDate = new Date(p.publishDate);
-                    // 如果最后提交时间晚于发布时间，说明已经考过了最新推送的版本
                     if (submitDate >= publishDate) return null;
                 } else {
-                    // 如果没有发布时间（旧数据）且有记录，则按原逻辑隐藏
                     return null;
                 }
             }
 
-            // 检查是否有进行中的会话
             const session = await db.getExamSession(user.id, p.id);
-            return { ...p, isOngoing: !!session };
+            let pusherName = '未知用户';
+            if (p.creatorId) {
+                const creator = await db.getUserById(p.creatorId);
+                if (creator && creator.username) {
+                    pusherName = creator.username;
+                }
+            }
+            return { ...p, isOngoing: !!session, pusherName };
         });
 
         const results = await Promise.all(availablePromises);
@@ -1008,6 +1005,11 @@ module.exports = function initRoutes(app, context) {
                 : false;
             if (!inGroup && !inUsers) return res.status(403).json({ error: '无权提交该试卷成绩' });
 
+            if (paper.startTime) {
+                const now = new Date();
+                const startTime = new Date(paper.startTime.replace(' ', 'T'));
+                if (now < startTime) return res.status(400).json({ error: '考试未开始' });
+            }
             if (paper.deadline) {
                 const now = new Date();
                 const deadline = new Date(paper.deadline.replace(' ', 'T'));
@@ -1083,8 +1085,9 @@ module.exports = function initRoutes(app, context) {
 
         const rankedList = ranking.map((r, i) => ({ ...r, rank: i + 1 }));
         res.json({
-            totalAssigned: totalAssigned || rankedList.length, // 至少是参与人数
-            ranking: rankedList
+            totalAssigned: totalAssigned || rankedList.length,
+            ranking: rankedList,
+            passScore: paper.passScore == null ? 0 : Number(paper.passScore)
         });
     });
 
@@ -1116,9 +1119,14 @@ module.exports = function initRoutes(app, context) {
                 return res.status(403).json({ error: '无权参加该考试' });
             }
 
-            // 截止时间检查
+            const now = new Date();
+            if (paper.startTime) {
+                const startTime = new Date(paper.startTime.replace(' ', 'T'));
+                if (now < startTime) {
+                    return res.status(400).json({ error: '考试未开始' });
+                }
+            }
             if (paper.deadline) {
-                const now = new Date();
                 const deadline = new Date(paper.deadline.replace(' ', 'T'));
                 if (deadline < now) {
                     return res.status(400).json({ error: '考试已截止' });
@@ -1175,7 +1183,10 @@ module.exports = function initRoutes(app, context) {
                     name: paper.name,
                     rules: paper.rules || [],
                     questions: paper.questions || {},
-                    deadline: paper.deadline || null
+                    startTime: paper.startTime || null,
+                    deadline: paper.deadline || null,
+                    shuffleQuestions: paper.shuffleQuestions || false,
+                    shuffleOptions: paper.shuffleOptions || false
                 },
                 questions: selectedQuestions,
                 session: {

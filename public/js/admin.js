@@ -994,6 +994,7 @@ let currentGroupFilter = 'all'; // 'all' | 'public' | groupId
 let currentTypeFilter = 'all';  // 'all' | 'single' | 'multiple' | 'judge'
 let currentMajorFilter = 'all'; // 'all' | majorId
 let currentDeviceFilter = 'all'; // 'all' | deviceId
+let currentMustFilter = 'all'; // 'all' | 'must' | 'not_must'
 
 // 手动选题器的筛选状态
 let selectorGroupFilter = 'all';
@@ -1009,7 +1010,7 @@ function toggleFilterDropdown(filterType) {
     }
 
     // 先关闭所有其他下拉菜单
-    ['group', 'type', 'major', 'device'].forEach(type => {
+    ['group', 'type', 'must', 'major', 'device'].forEach(type => {
         if (type !== filterType) {
             const otherMenu = document.getElementById(`${type}-filter-menu`);
             if (otherMenu) otherMenu.style.display = 'none';
@@ -1023,6 +1024,7 @@ function toggleFilterDropdown(filterType) {
         // 初始化对应的下拉菜单
         if (filterType === 'group') initGroupFilterDropdown();
         else if (filterType === 'type') initTypeFilterDropdown();
+        else if (filterType === 'must') initMustFilterDropdown();
         else if (filterType === 'major') initMajorFilterDropdown();
         else if (filterType === 'device') initDeviceFilterDropdown();
 
@@ -1103,6 +1105,28 @@ function initTypeFilterDropdown() {
     updateFilterLabel('type', options);
 }
 
+function initMustFilterDropdown() {
+    const menu = document.getElementById('must-filter-menu');
+    if (!menu) return;
+
+    const options = [
+        { id: 'all', name: '全部题目' },
+        { id: 'must', name: '必考题' },
+        { id: 'not_must', name: '非必考题' }
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${currentMustFilter === opt.id ? 'active' : ''}" 
+             data-type="must" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    updateFilterLabel('must', options);
+}
+
 // 专业筛选
 function initMajorFilterDropdown() {
     const menu = document.getElementById('major-filter-menu');
@@ -1134,6 +1158,7 @@ function updateFilterLabel(filterType, options) {
     else if (filterType === 'type') currentValue = currentTypeFilter;
     else if (filterType === 'major') currentValue = currentMajorFilter;
     else if (filterType === 'device') currentValue = currentDeviceFilter;
+    else if (filterType === 'must') currentValue = currentMustFilter;
 
     const selectedOpt = options.find(o => o.id === currentValue);
     if (label && selectedOpt) {
@@ -1152,6 +1177,7 @@ function selectFilter(filterType, value, name) {
         updateDeviceFilterButton();
     }
     else if (filterType === 'device') currentDeviceFilter = value;
+    else if (filterType === 'must') currentMustFilter = value;
 
     document.getElementById(`${filterType}-filter-label`).textContent = name;
     document.getElementById(`${filterType}-filter-menu`).style.display = 'none';
@@ -1343,6 +1369,7 @@ function initDeviceFilterDropdown() {
 function initAllFilterDropdowns() {
     initGroupFilterDropdown();
     initTypeFilterDropdown();
+    initMustFilterDropdown();
     initMajorFilterDropdown();
     initDeviceFilterDropdown();
     updateDeviceFilterButton();
@@ -1379,23 +1406,32 @@ function loadQuestions() {
         questions = questions.filter(q => q.deviceType === currentDeviceFilter);
     }
 
+    if (currentMustFilter === 'must') {
+        questions = questions.filter(q => q.must === 1);
+    } else if (currentMustFilter === 'not_must') {
+        questions = questions.filter(q => !q.must);
+    }
+
     const typeMap = { single: '单选题', multiple: '多选题', judge: '判断题' };
     const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
     const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
     const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
 
     const html = questions.length ? `<div class="table-container"><table class="data-table">
-    <thead><tr><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>最后修改</th><th>操作</th></tr></thead>
-    <tbody>${questions.map(q => {
+    <thead><tr><th>序号</th><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>必考题</th><th>最后修改</th><th>操作</th></tr></thead>
+    <tbody>${questions.map((q, index) => {
         const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && q.groupId === currentUser.groupId);
         const canDelete = canEdit;
+        const isMust = q.must ? 1 : 0;
 
         return `<tr>
+      <td style="text-align:center;">${index + 1}</td>
       <td>${escapeHtml(getMajorName(q.category))}</td>
       <td>${escapeHtml(getDeviceName(q.deviceType) || '-')}</td>
       <td><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
       <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(q.content)}</td>
       <td><span class="badge ${q.type === 'single' ? 'badge-primary' : (q.type === 'multiple' ? 'badge-warning' : 'badge-success')}">${typeMap[q.type]}</span></td>
+      <td><span class="badge ${isMust ? 'badge-success' : 'badge-transparent'}">${isMust ? '是' : '否'}</span></td>
       <td style="white-space:nowrap;">${formatFullDateTime(q.updatedAt)}</td>
       <td>
         ${canEdit ? `<button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'editQuestion', ['id'])">编辑</button>` : ''}
@@ -1403,6 +1439,10 @@ function loadQuestions() {
       </td>
     </tr>`;
     }).join('')}</tbody></table></div>` : `<p class="text-muted">所选条件下暂无题目</p>`;
+    const countEl = document.getElementById('questions-count');
+    if (countEl) {
+        countEl.textContent = '共' + questions.length + '题';
+    }
     document.getElementById('questions-list').innerHTML = html;
 }
 
@@ -1427,28 +1467,58 @@ function showQuestionEditor(type) {
     if (editorContainer) editorContainer.innerHTML = '';
     if (modalBody) modalBody.innerHTML = '';
 
-    const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A', groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null };
+    const q = editingQuestion || { category: '', deviceType: '', content: '', options: type === 'judge' ? ['正确', '错误'] : ['', '', '', ''], answer: 'A', groupId: currentUser.role === 'group_admin' ? currentUser.groupId : null, must: 0 };
 
     // 找到当前专业对应的设备类型
     const currentMajorId = q.category || '';
     const currentDevices = devices.filter(d => d.parentId === currentMajorId);
 
+    const mustVal = q.must ? '1' : '0';
     let optionsHtml = '';
     if (type === 'judge') {
-        const currentAnswer = (q.answer === 'true' || q.answer === true) ? 'A' : (q.answer === 'false' || q.answer === false) ? 'B' : q.answer;
+        const currentAnswer = (q.answer === 'true' || q.answer === true)
+            ? 'A'
+            : (q.answer === 'false' || q.answer === false)
+                ? 'B'
+                : (Array.isArray(q.answer) ? (q.answer[0] || '') : (q.answer || ''));
+
         optionsHtml = `<div class="form-group"><label class="form-label">选项</label>
       <div id="options-container" class="options-grid">
         <div class="option-row"><span class="option-label">A.</span><input type="text" class="form-input" value="正确" disabled></div>
         <div class="option-row"><span class="option-label">B.</span><input type="text" class="form-input" value="错误" disabled></div>
       </div>
       </div>
-      <div class="form-group"><label class="form-label">正确答案</label>
-      <select class="form-select" id="q-answer">
-        <option value="A" ${currentAnswer === 'A' ? 'selected' : ''}>A</option>
-        <option value="B" ${currentAnswer === 'B' ? 'selected' : ''}>B</option>
-      </select></div>`;
+      <div style="display:flex;gap:16px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">正确答案</label>
+          <div id="q-answer-group" class="answer-checkbox-group" data-question-type="judge">
+            <label class="answer-checkbox-label">
+              <input type="checkbox" name="q-answer-option" value="A" ${currentAnswer === 'A' ? 'checked' : ''} onchange="onAnswerCheckboxChange('judge', this)">
+              <span>A</span>
+            </label>
+            <label class="answer-checkbox-label">
+              <input type="checkbox" name="q-answer-option" value="B" ${currentAnswer === 'B' ? 'checked' : ''} onchange="onAnswerCheckboxChange('judge', this)">
+              <span>B</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">必考题</label>
+          <select class="form-select answer-checkbox-select" id="q-must">
+            <option value="1" ${mustVal === '1' ? 'selected' : ''}>是</option>
+            <option value="0" ${mustVal !== '1' ? 'selected' : ''}>否</option>
+          </select>
+        </div>
+      </div>`;
     } else {
         const opts = q.options || ['', '', '', ''];
+        const validLabels = 'ABCDEFGH'.substring(0, opts.length).split('');
+        const currentAnswers = Array.isArray(q.answer)
+            ? q.answer
+            : (typeof q.answer === 'string'
+                ? q.answer.split(/[,，]/).map(a => a.trim()).filter(a => a)
+                : (q.answer ? [q.answer] : []));
+
         optionsHtml = `<div class="form-group"><label class="form-label">选项</label>
       <div id="options-container" class="options-grid">
         ${opts.map((o, i) => `<div class="option-row"><span class="option-label">${'ABCDEFGH'[i]}.</span>
@@ -1460,8 +1530,26 @@ function showQuestionEditor(type) {
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
         添加选项
       </div></div>
-      <div class="form-group"><label class="form-label">正确答案 ${type === 'multiple' ? '(多选用逗号分隔，如A,C)' : ''}</label>
-        <input type="text" class="form-input" id="q-answer" value="${Array.isArray(q.answer) ? q.answer.join(',') : q.answer}" placeholder="${type === 'multiple' ? '如：A,C' : '如：A'}"></div>`;
+      <div style="display:flex;gap:16px;">
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">正确答案${type === 'multiple' ? '（可多选）' : ''}</label>
+          <div id="q-answer-group" class="answer-checkbox-group" data-question-type="${type}">
+            ${validLabels.map((l, i) => `
+              <label class="answer-checkbox-label">
+                <input type="checkbox" name="q-answer-option" value="${l}" ${currentAnswers.includes(l) ? 'checked' : ''} onchange="onAnswerCheckboxChange('${type}', this)">
+                <span>${l}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label class="form-label">必考题</label>
+          <select class="form-select answer-checkbox-select" id="q-must">
+            <option value="1" ${mustVal === '1' ? 'selected' : ''}>是</option>
+            <option value="0" ${mustVal !== '1' ? 'selected' : ''}>否</option>
+          </select>
+        </div>
+      </div>`;
     }
 
     const groupOptions = `
@@ -1532,6 +1620,16 @@ function onMajorChange() {
         : '<option value="">请先选择专业</option>';
 }
 
+function onAnswerCheckboxChange(type, checkbox) {
+    if (type === 'multiple') return;
+    if (!checkbox || !checkbox.checked) return;
+    const group = checkbox.closest('#q-answer-group');
+    if (!group) return;
+    group.querySelectorAll('input[name="q-answer-option"]').forEach(cb => {
+        if (cb !== checkbox) cb.checked = false;
+    });
+}
+
 
 function addOption() {
     const container = document.getElementById('options-container');
@@ -1545,12 +1643,14 @@ function addOption() {
         <button class="btn btn-sm btn-danger" onclick="safeOnclick(this, 'removeOption')" style="padding:4px 8px;font-size:12px;">删除</button>
     </div>`);
     updateOptionLabels(container);
+    syncAnswerCheckboxesWithOptions();
 }
 
 function removeOption(btn) {
     const container = btn.closest('#options-container');
     btn.closest('.option-row').remove();
     updateOptionLabels(container);
+    syncAnswerCheckboxesWithOptions();
 }
 
 function updateOptionLabels(container) {
@@ -1564,13 +1664,43 @@ function updateOptionLabels(container) {
     });
 }
 
+function syncAnswerCheckboxesWithOptions() {
+    const container = document.getElementById('options-container');
+    const group = document.getElementById('q-answer-group');
+    if (!container || !group) return;
+
+    const type = group.getAttribute('data-question-type') || 'single';
+    if (type === 'judge') return;
+
+    const existingChecked = new Set(
+        Array.from(group.querySelectorAll('input[name="q-answer-option"]:checked'))
+            .map(cb => cb.value)
+    );
+
+    const optionInputs = Array.from(container.querySelectorAll('.option-row input'));
+    const labels = 'ABCDEFGH';
+
+    const items = optionInputs.map((input, index) => {
+        const label = labels[index];
+        const checked = existingChecked.has(label) ? 'checked' : '';
+        return `
+            <label class="answer-checkbox-label">
+                <input type="checkbox" name="q-answer-option" value="${label}" ${checked} onchange="onAnswerCheckboxChange('${type}', this)">
+                <span>${label}</span>
+            </label>
+        `;
+    });
+
+    group.innerHTML = items.join('');
+}
+
 async function saveQuestion(type) {
     try {
         const categoryEl = document.getElementById('q-category');
         const deviceTypeEl = document.getElementById('q-deviceType');
         const groupIdEl = document.getElementById('q-groupId');
         const contentEl = document.getElementById('q-content');
-        const answerEl = document.getElementById('q-answer');
+        const mustEl = document.getElementById('q-must');
 
         if (!categoryEl || !contentEl) {
             console.error('Missing form elements');
@@ -1583,10 +1713,23 @@ async function saveQuestion(type) {
         const groupId = groupIdEl ? groupIdEl.value : null;
         const content = contentEl.value.trim();
         let options = [], answer;
+        const must = mustEl ? (mustEl.value === '1' ? 1 : 0) : 0;
+        const answerCheckboxes = Array.from(document.querySelectorAll('input[name="q-answer-option"]:checked'));
 
         if (type === 'judge') {
             options = ['正确', '错误'];
-            answer = answerEl.value;
+
+            if (answerCheckboxes.length !== 1) {
+                showAlert('判断题必须且只能选择一个正确答案');
+                return;
+            }
+
+            const answerVal = (answerCheckboxes[0].value || '').toUpperCase().trim();
+            if (!['A', 'B'].includes(answerVal)) {
+                showAlert('判断题正确答案无效');
+                return;
+            }
+            answer = answerVal;
         } else {
             const container = document.getElementById('options-container');
             if (container) {
@@ -1599,15 +1742,13 @@ async function saveQuestion(type) {
                 return;
             }
 
-            const answerVal = answerEl.value.toUpperCase().trim();
             const validLabels = 'ABCDEFGH'.substring(0, options.length).split('');
 
             if (type === 'multiple') {
-                // 支持中英文逗号
-                const answers = answerVal.split(/[,，]/).map(a => a.trim()).filter(a => a);
+                const answers = answerCheckboxes.map(cb => (cb.value || '').toUpperCase().trim()).filter(a => a);
 
                 if (answers.length === 0) {
-                    showAlert('请输入正确答案');
+                    showAlert('多选题至少选择一个正确答案');
                     return;
                 }
 
@@ -1620,8 +1761,13 @@ async function saveQuestion(type) {
                 answer = answers;
             } else {
                 // 单选题
+                if (answerCheckboxes.length !== 1) {
+                    showAlert('单选题必须且只能选择一个正确答案');
+                    return;
+                }
+                const answerVal = (answerCheckboxes[0].value || '').toUpperCase().trim();
                 if (!answerVal) {
-                    showAlert('请输入正确答案');
+                    showAlert('请选择正确答案');
                     return;
                 }
                 if (!validLabels.includes(answerVal)) {
@@ -1641,7 +1787,7 @@ async function saveQuestion(type) {
             btn.disabled = true;
         }
 
-        const question = { type, category, deviceType, content, options, answer, groupId: groupId || null };
+        const question = { type, category, deviceType, content, options, answer, must, groupId: groupId || null };
         if (editingQuestion) {
             await Storage.updateQuestion({ ...question, id: editingQuestion.id });
         } else {
@@ -1693,22 +1839,42 @@ function loadPaperGroups() { }
 function loadPapers() {
     const papers = cachedData.papers;
     const currentUser = Storage.getCurrentUser();
-    const getAdminName = (groupId) => {
-        if (!groupId) return '超级管理员';
-        return cachedData.groups.find(g => g.id === groupId)?.name || '未知分组';
+    const getCreatorName = (creatorId) => {
+        if (!creatorId) return '-';
+        const user = cachedData.users.find(u => u.id === creatorId);
+        return user ? user.username : '未知用户';
+    };
+    const getPaperBelong = (creatorId) => {
+        if (!creatorId) return '超级管理员';
+        const user = cachedData.users.find(u => u.id === creatorId);
+        if (!user) return '未知用户';
+        if (!user.groupId) return '超级管理员';
+        const group = cachedData.groups.find(g => g.id === user.groupId);
+        return group ? group.name : '未知分组';
     };
 
-    const html = papers.length ? `<table class="data-table"><thead><tr><th>试卷名称</th><th>试卷管理员</th><th style="width:180px;">创建日期</th><th>状态</th><th>操作</th></tr></thead>
-    <tbody>${papers.map(p => {
+    const html = papers.length ? `<table class="data-table"><thead><tr>
+      <th style="width:60px;text-align:center;">序号</th>
+      <th style="text-align:center;">试卷名称</th>
+      <th style="text-align:center;">创建人</th>
+      <th style="text-align:center;">试卷归属</th>
+      <th style="width:180px;text-align:center;">创建日期</th>
+      <th style="text-align:center;">状态</th>
+      <th style="width:260px;text-align:center;">操作</th>
+    </tr></thead>
+    <tbody>${papers.map((p, index) => {
         const canManage = currentUser.role === 'super_admin' || p.creatorId === currentUser.id;
         return `<tr>
-      <td>${escapeHtml(p.name)}</td>
-      <td>${escapeHtml(getAdminName(p.groupId))}</td>
-      <td style="white-space:nowrap;">${formatFullDateTime(p.createDate)}</td>
-      <td><span class="badge ${p.published ? 'badge-success' : 'badge-warning'}">${p.published ? '已发布' : '草稿'}</span></td>
-      <td>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-sm btn-secondary" data-id="${p.id}" onclick="safeOnclick(this, 'showPushLogs', ['id'])">推送记录</button>
+      <td style="text-align:center;">${index + 1}</td>
+      <td style="text-align:center;">${escapeHtml(p.name)}</td>
+      <td style="text-align:center;">${escapeHtml(getCreatorName(p.creatorId))}</td>
+      <td style="text-align:center;">${escapeHtml(getPaperBelong(p.creatorId))}</td>
+      <td style="white-space:nowrap;text-align:center;">${formatFullDateTime(p.createDate)}</td>
+      <td style="text-align:center;">
+        <button class="btn btn-sm btn-secondary" data-id="${p.id}" onclick="safeOnclick(this, 'showPushLogs', ['id'])">推送记录</button>
+      </td>
+      <td style="text-align:center;white-space:nowrap;">
+        <div style="display:inline-flex;gap:8px;flex-wrap:nowrap;justify-content:center;">
             ${canManage ? `
                 <button class="btn btn-sm btn-info" data-id="${p.id}" onclick="safeOnclick(this, 'editPaper', ['id'])">编辑</button>
                 <button class="btn btn-sm btn-primary" data-id="${p.id}" onclick="safeOnclick(this, 'showPublishModal', ['id'])">推送</button>
@@ -1741,21 +1907,33 @@ async function showPushLogs(paperId) {
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th style="width:180px;">推送时间</th>
+                        <th style="width:200px;">推送信息</th>
+                        <th>考试时间</th>
                         <th>目标分组</th>
                         <th>目标用户</th>
-                        <th style="width:180px;">截止时间</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${logs.map(log => `
+                    ${logs.map(log => {
+                        const startText = log.startTime ? formatFullDateTime(log.startTime) : '-';
+                        const endText = log.deadline ? formatFullDateTime(log.deadline) : '-';
+                        const examTimeText = (startText === '-' && endText === '-') ? '-' : `${startText} ~ ${endText}`;
+                        const pusherName = paper && paper.creatorId
+                            ? (users.find(u => u.id === paper.creatorId)?.username || '未知用户')
+                            : '未知用户';
+                        return `
                         <tr>
-                            <td style="white-space:nowrap;">${formatFullDateTime(log.pushTime)}</td>
+                            <td style="white-space:nowrap;">
+                                <div style="display:flex;flex-direction:column;gap:4px;">
+                                    <div>推送时间：${formatFullDateTime(log.pushTime)}</div>
+                                    <div>推送人：${pusherName}</div>
+                                </div>
+                            </td>
+                            <td style="white-space:nowrap;">${examTimeText}</td>
                             <td>${getGroupNames(log.targetGroups)}</td>
                             <td>${getUserNames(log.targetUsers)}</td>
-                            <td style="white-space:nowrap;">${formatFullDateTime(log.deadline)}</td>
-                        </tr>
-                    `).join('')}
+                        </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
         </div>
@@ -1778,6 +1956,12 @@ function showPaperEditor() {
     updateRulesTable();
     disableGenerateButtons();
     document.getElementById('manual-select-area').classList.add('hidden');
+    const sqEl = document.getElementById('paper-shuffle-questions');
+    const soEl = document.getElementById('paper-shuffle-options');
+    const passEl = document.getElementById('paper-pass-score');
+    if (sqEl) sqEl.checked = false;
+    if (soEl) soEl.checked = false;
+    if (passEl) passEl.value = '';
 }
 
 function editPaper(paperId) {
@@ -1797,9 +1981,15 @@ function editPaper(paperId) {
     selectedQuestions = JSON.parse(JSON.stringify(paper.questions || {}));
     
     updateRulesTable();
-    rulesValidated = true; // 编辑模式下默认已校验
+    rulesValidated = true;
     enableGenerateButtons();
     document.getElementById('manual-select-area').classList.add('hidden');
+    const sqEl = document.getElementById('paper-shuffle-questions');
+    const soEl = document.getElementById('paper-shuffle-options');
+    const passEl = document.getElementById('paper-pass-score');
+    if (sqEl) sqEl.checked = !!paper.shuffleQuestions;
+    if (soEl) soEl.checked = !!paper.shuffleOptions;
+    if (passEl) passEl.value = paper.passScore != null ? paper.passScore : '';
     
     // 滚动到编辑器
     document.getElementById('paper-editor').scrollIntoView({ behavior: 'smooth' });
@@ -2216,6 +2406,10 @@ function viewQuestionDetail(id) {
 
 async function generatePaperFromSelection() {
     const name = document.getElementById('paper-name').value.trim();
+    const shuffleQuestions = document.getElementById('paper-shuffle-questions')?.checked || false;
+    const shuffleOptions = document.getElementById('paper-shuffle-options')?.checked || false;
+    const passScoreVal = document.getElementById('paper-pass-score')?.value;
+    const passScore = passScoreVal === '' ? 0 : Number(passScoreVal);
 
     for (const rule of paperRules) {
         const count = (selectedQuestions[rule.type] || []).length;
@@ -2230,7 +2424,10 @@ async function generatePaperFromSelection() {
         name,
         rules: paperRules,
         questions: selectedQuestions,
-        published: false
+        published: false,
+        shuffleQuestions,
+        shuffleOptions,
+        passScore
     };
 
     if (currentEditingPaperId) {
@@ -2251,6 +2448,10 @@ async function autoGeneratePaper() {
     const name = document.getElementById('paper-name').value.trim();
     const questions = cachedData.questions;
     const generatedQuestions = {};
+    const shuffleQuestions = document.getElementById('paper-shuffle-questions')?.checked || false;
+    const shuffleOptions = document.getElementById('paper-shuffle-options')?.checked || false;
+    const passScoreVal = document.getElementById('paper-pass-score')?.value;
+    const passScore = passScoreVal === '' ? 0 : Number(passScoreVal);
 
     for (const rule of paperRules) {
         const pool = questions.filter(q => q.type === rule.type);
@@ -2262,7 +2463,10 @@ async function autoGeneratePaper() {
         name,
         rules: paperRules,
         questions: generatedQuestions,
-        published: false
+        published: false,
+        shuffleQuestions,
+        shuffleOptions,
+        passScore
     };
 
     if (currentEditingPaperId) {
@@ -2283,10 +2487,15 @@ async function publishPaper(paperId) {
 
     const targetGroups = Array.from(groupItems).map(item => item.dataset.id);
     const targetUsers = Array.from(userItems).map(item => item.dataset.id);
+    const startVal = document.getElementById('publish-startTime').value;
     const deadlineVal = document.getElementById('publish-deadline').value;
 
     if (!targetGroups.length && !targetUsers.length) {
         showAlert('请至少选择一个目标分组或目标用户');
+        return;
+    }
+    if (!startVal) {
+        showAlert('请选择开始时间');
         return;
     }
     if (!deadlineVal) {
@@ -2294,8 +2503,9 @@ async function publishPaper(paperId) {
         return;
     }
 
+    const startTime = startVal.replace('T', ' ');
     const deadline = deadlineVal.replace('T', ' ');
-    await Storage.publishPaper(paperId, targetGroups, targetUsers, deadline);
+    await Storage.publishPaper(paperId, targetGroups, targetUsers, startTime, deadline);
     closeModal();
     await refreshCache();
     loadPapers();
@@ -2318,12 +2528,18 @@ function showPublishModal(paperId) {
     const currentGroups = paper?.targetGroups || [];
     const currentUsers = paper?.targetUsers || [];
 
-    // 默认截止时间为当前时间+3天
+    // 默认开始时间为当前时间，截止时间为当前时间+3天
+    let defaultStartTime = "";
     let defaultDeadline = "";
+    const now = new Date();
+    if (paper?.startTime) {
+        defaultStartTime = paper.startTime.replace(' ', 'T');
+    } else {
+        defaultStartTime = now.toISOString().slice(0, 16);
+    }
     if (paper?.deadline) {
         defaultDeadline = paper.deadline.replace(' ', 'T');
     } else {
-        const now = new Date();
         const future = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
         defaultDeadline = future.toISOString().slice(0, 16);
     }
@@ -2372,8 +2588,16 @@ function showPublishModal(paperId) {
             </div>
         </div>
         <div class="form-group" style="margin-top:20px;">
-            <label class="form-label">截止时间 (日期+时间)</label>
-            <input type="datetime-local" class="form-input" id="publish-deadline" value="${defaultDeadline}">
+            <div style="display:flex;gap:12px;">
+                <div style="flex:1;">
+                    <label class="form-label">开始时间 (日期+时间)</label>
+                    <input type="datetime-local" class="form-input" id="publish-startTime" value="${defaultStartTime}">
+                </div>
+                <div style="flex:1;">
+                    <label class="form-label">截止时间 (日期+时间)</label>
+                    <input type="datetime-local" class="form-input" id="publish-deadline" value="${defaultDeadline}">
+                </div>
+            </div>
         </div>
     `;
 
@@ -2416,6 +2640,7 @@ async function loadAdminRanking(paperId) {
     const container = document.getElementById('admin-ranking-content');
 
     const ranking = data.ranking || [];
+    const passScore = data.passScore != null ? Number(data.passScore) : 0;
     const totalAssigned = data.totalAssigned || ranking.length || 0;
 
     if (!ranking.length) {
@@ -2423,9 +2648,14 @@ async function loadAdminRanking(paperId) {
         return;
     }
 
-    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>用时</th><th style="width:180px;">交卷时间</th></tr></thead>
-    <tbody>${ranking.map(r => `<tr><td>${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `${r.rank}/${totalAssigned}`}</td>
-      <td>${r.username}</td><td><strong>${r.score}</strong></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td></tr>`).join('')}</tbody></table>`;
+    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>成绩</th><th>用时</th><th style="width:180px;">交卷时间</th></tr></thead>
+    <tbody>${ranking.map(r => {
+        const passed = passScore > 0 ? r.score >= passScore : true;
+        const label = passed ? '及格' : '不及格';
+        const cls = passed ? 'text-success' : 'text-danger';
+        return `<tr><td>${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `${r.rank}/${totalAssigned}`}</td>
+      <td>${r.username}</td><td><strong>${r.score}</strong></td><td><span class="${cls}">${label}</span></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td></tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 
@@ -2851,6 +3081,7 @@ function loadAdminAnalysisOptions() {
 async function loadAdminAnalysis(paperId) {
     const data = await Storage.getRanking(paperId);
     const ranking = data.ranking || [];
+    const passScore = data.passScore != null ? Number(data.passScore) : 0;
     const totalAssigned = data.totalAssigned || 0;
     const takenCount = ranking.length;
     const notTakenCount = Math.max(0, totalAssigned - takenCount);
@@ -2872,42 +3103,93 @@ async function loadAdminAnalysis(paperId) {
     const minScore = Math.min(...scores);
     const avgScore = (scores.reduce((a, b) => a + b, 0) / takenCount).toFixed(1);
 
+    let passCount = 0;
+    if (passScore > 0) {
+        passCount = ranking.filter(r => r.score >= passScore).length;
+    } else {
+        passCount = takenCount;
+    }
+    const failCount = takenCount - passCount;
+    const passRate = takenCount > 0 ? ((passCount * 100) / takenCount).toFixed(1) + '%' : '0%';
+
     const fastestTime = Math.min(...times);
     const slowestTime = Math.max(...times);
+    const avgTime = Math.round(times.reduce((a, b) => a + b, 0) / takenCount);
 
     const html = `
-    <div class="analysis-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:20px;">
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">需考试人数</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text-primary);">${totalAssigned}</div>
+    <div class="analysis-section">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">人数统计</div>
+        <div class="analysis-grid" style="display:grid;grid-template-columns:repeat(8, minmax(120px, 1fr));gap:16px;">
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">需考试人数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--text-primary);">${totalAssigned}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">已考试人数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--success);">${takenCount}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">未考试人数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--warning);">${notTakenCount}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">及格人数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--success);">${passCount}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">不及格人数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--danger);">${failCount}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">及格率</div>
+                <div style="font-size:24px;font-weight:700;color:var(--primary);">${passRate}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
         </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">已考试人数</div>
-            <div style="font-size:24px;font-weight:700;color:var(--success);">${takenCount}</div>
+    </div>
+    <div class="analysis-section" style="margin-top:24px;">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">得分统计</div>
+        <div class="analysis-grid" style="display:grid;grid-template-columns:repeat(8, minmax(120px, 1fr));gap:16px;">
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最高分</div>
+                <div style="font-size:24px;font-weight:700;color:var(--primary);">${maxScore}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最低分</div>
+                <div style="font-size:24px;font-weight:700;color:var(--danger);">${minScore}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">平均分</div>
+                <div style="font-size:24px;font-weight:700;color:var(--text-primary);">${avgScore}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
         </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">未考试人数</div>
-            <div style="font-size:24px;font-weight:700;color:var(--warning);">${notTakenCount}</div>
-        </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最高分</div>
-            <div style="font-size:24px;font-weight:700;color:var(--primary);">${maxScore}</div>
-        </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最低分</div>
-            <div style="font-size:24px;font-weight:700;color:var(--danger);">${minScore}</div>
-        </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">平均分</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text-primary);">${avgScore}</div>
-        </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最快答题时间</div>
-            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(fastestTime, true)}</div>
-        </div>
-        <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最慢答题时间</div>
-            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(slowestTime, true)}</div>
+    </div>
+    <div class="analysis-section" style="margin-top:24px;">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">答题时间统计</div>
+        <div class="analysis-grid" style="display:grid;grid-template-columns:repeat(8, minmax(120px, 1fr));gap:16px;">
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最快答题时间</div>
+                <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(fastestTime, true)}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">最慢答题时间</div>
+                <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(slowestTime, true)}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">平均答题时间</div>
+                <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${formatDuration(avgTime, true)}</div>
+            </div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
+            <div class="analysis-card" style="padding:20px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--border);visibility:hidden;"></div>
         </div>
     </div>`;
 
