@@ -288,16 +288,17 @@
                         </div>
                         <div class="card-body">
                             <div class="table-container">
-                                <table class="data-table" id="rules-table" style="table-layout:fixed;">
+                                <table class="data-table" id="rules-table">
                                     <thead>
                                         <tr>
-                                            <th style="width:140px;text-align:center;">题型</th>
-                                            <th style="width:100px;text-align:center;">数量</th>
-                                            <th style="width:100px;text-align:center;">分值</th>
-                                            <th style="width:100px;text-align:center;">漏选得分</th>
-                                            <th style="width:120px;text-align:center;">答题时限(秒)</th>
-                                            <th style="width:80px;text-align:center;">小计</th>
-                                            <th style="width:80px;text-align:center;">操作</th>
+                                            <th style="text-align:center;">题型</th>
+                                            <th style="text-align:center;">数量</th>
+                                            <th style="text-align:center;">分值</th>
+                                            <th style="text-align:center;">漏选得分</th>
+                                            <th style="text-align:center;">必考题数</th>
+                                            <th style="text-align:center;">答题时限(秒)</th>
+                                            <th style="text-align:center;">小计</th>
+                                            <th style="text-align:center;">操作</th>
                                         </tr>
                                     </thead>
                                     <tbody id="rules-body"></tbody>
@@ -308,17 +309,17 @@
                                                     style="width:120px;cursor:pointer;text-align:center;background-image:none;">+
                                                     添加题型</button>
                                             </td>
-                                            <td colspan="3"></td>
+                                            <td colspan="4"></td>
                                             <td style="text-align:right;font-size:16px;white-space:nowrap;"><strong>总分：</strong></td>
                                             <td style="text-align:center;font-size:18px;">
                                                 <strong id="total-score">0</strong>
                                             </td>
-                                            <td style="text-align:right;font-size:18px;white-space:nowrap;">
-                                                <span style="color:var(--text-secondary);">
-                                                    及格分
-                                                    <input id="paper-pass-score" type="number" min="0"
-                                                        style="width:72px;margin-left:8px;text-align:center;font-size:16px;"
-                                                        class="form-input">
+                                            <td style="text-align:center;font-size:16px;vertical-align:middle;position:relative;">
+                                                <input id="paper-pass-score" type="number" min="0"
+                                                    style="width:72px;text-align:center;font-size:16px;display:block;margin:0 auto;"
+                                                    class="form-input">
+                                                <span style="position:absolute;top:50%;transform:translateY(-50%);right:calc(50% + 44px);color:var(--text-secondary);white-space:nowrap;">
+                                                    及格分：
                                                 </span>
                                             </td>
                                         </tr>
@@ -341,10 +342,27 @@
                     <!-- 手动选题区域 -->
                     <div id="manual-select-area" class="hidden">
                         <div class="card mb-4">
-                            <div class="card-header"><span class="card-title">手动选择题目</span></div>
+                            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                                <span class="card-title">手动选择题目</span>
+                                <button class="btn btn-success btn-sm" onclick="generatePaperFromSelection()" style="white-space:nowrap;">
+                                    生成试卷
+                                </button>
+                            </div>
                             <div class="card-body" id="manual-select-content"></div>
                         </div>
-                        <button class="btn btn-success" onclick="generatePaperFromSelection()">生成试卷</button>
+                    </div>
+
+                    <!-- 自动生成题目区域 -->
+                    <div id="auto-generate-area" class="hidden">
+                        <div class="card mb-4">
+                            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                                <span class="card-title">自动生成题目</span>
+                                <button class="btn btn-success btn-sm" onclick="doAutoGeneratePaper()" style="white-space:nowrap;">
+                                    生成试卷
+                                </button>
+                            </div>
+                            <div class="card-body" id="auto-generate-content"></div>
+                        </div>
                     </div>
                 </div>
 

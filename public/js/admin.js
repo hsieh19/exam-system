@@ -1000,6 +1000,7 @@ let currentMustFilter = 'all'; // 'all' | 'must' | 'not_must'
 let selectorGroupFilter = 'all';
 let selectorMajorFilter = 'all';
 let selectorDeviceFilter = 'all';
+let selectorMustFilter = 'all';
 let selectorKeywordFilter = '';
 
 // 通用下拉菜单控制
@@ -1214,7 +1215,7 @@ function toggleSelectorFilterDropdown(filterType) {
     if (filterType === 'device' && selectorMajorFilter === 'all') return;
 
     // 关闭所有选题器下拉菜单
-    ['group', 'major', 'device'].forEach(type => {
+    ['group', 'major', 'device', 'must'].forEach(type => {
         if (type !== filterType) {
             const menu = document.getElementById(`selector-${type}-filter-menu`);
             if (menu) menu.style.display = 'none';
@@ -1228,6 +1229,7 @@ function toggleSelectorFilterDropdown(filterType) {
         if (filterType === 'group') initSelectorGroupFilterDropdown();
         else if (filterType === 'major') initSelectorMajorFilterDropdown();
         else if (filterType === 'device') initSelectorDeviceFilterDropdown();
+        else if (filterType === 'must') initSelectorMustFilterDropdown();
 
         menu.style.display = 'block';
         setTimeout(() => {
@@ -1236,6 +1238,26 @@ function toggleSelectorFilterDropdown(filterType) {
     } else {
         menu.style.display = 'none';
     }
+}
+
+function initSelectorMustFilterDropdown() {
+    const menu = document.getElementById('selector-must-filter-menu');
+    if (!menu) return;
+
+    const options = [
+        { id: 'all', name: '全部题目' },
+        { id: 'must', name: '仅必考题' },
+        { id: 'not_must', name: '仅非必考题' }
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorMustFilter === opt.id ? 'active' : ''}" 
+             data-type="must" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
 }
 
 function closeSelectorFilterDropdown(e, filterType) {
@@ -1303,6 +1325,26 @@ function initSelectorDeviceFilterDropdown() {
     `).join('');
 }
 
+function initSelectorMustFilterDropdown() {
+    const menu = document.getElementById('selector-must-filter-menu');
+    if (!menu) return;
+
+    const options = [
+        { id: 'all', name: '全部题目' },
+        { id: 'must', name: '仅必考题' },
+        { id: 'not_must', name: '仅非必考题' }
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorMustFilter === opt.id ? 'active' : ''}" 
+             data-type="must" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+}
+
 function selectSelectorFilter(filterType, value, name) {
     if (filterType === 'group') selectorGroupFilter = value;
     else if (filterType === 'major') {
@@ -1311,6 +1353,7 @@ function selectSelectorFilter(filterType, value, name) {
         updateSelectorDeviceFilterButton();
     }
     else if (filterType === 'device') selectorDeviceFilter = value;
+    else if (filterType === 'must') selectorMustFilter = value;
 
     document.getElementById(`selector-${filterType}-filter-label`).textContent = name;
     document.getElementById(`selector-${filterType}-filter-menu`).style.display = 'none';
@@ -1833,6 +1876,7 @@ let paperRules = [];
 let rulesValidated = false;
 let selectedQuestions = {};
 let currentEditingPaperId = null;
+let autoGenerateConfig = {};
 
 function loadPaperGroups() { }
 
@@ -1956,6 +2000,8 @@ function showPaperEditor() {
     updateRulesTable();
     disableGenerateButtons();
     document.getElementById('manual-select-area').classList.add('hidden');
+    const autoArea = document.getElementById('auto-generate-area');
+    if (autoArea) autoArea.classList.add('hidden');
     const sqEl = document.getElementById('paper-shuffle-questions');
     const soEl = document.getElementById('paper-shuffle-options');
     const passEl = document.getElementById('paper-pass-score');
@@ -1984,6 +2030,8 @@ function editPaper(paperId) {
     rulesValidated = true;
     enableGenerateButtons();
     document.getElementById('manual-select-area').classList.add('hidden');
+    const autoArea = document.getElementById('auto-generate-area');
+    if (autoArea) autoArea.classList.add('hidden');
     const sqEl = document.getElementById('paper-shuffle-questions');
     const soEl = document.getElementById('paper-shuffle-options');
     const passEl = document.getElementById('paper-pass-score');
@@ -2005,6 +2053,8 @@ function cancelPaperEdit() {
     rulesValidated = false;
     currentEditingPaperId = null;
     disableGenerateButtons();
+    const autoArea = document.getElementById('auto-generate-area');
+    if (autoArea) autoArea.classList.add('hidden');
 }
 
 function addRuleRow() {
@@ -2019,9 +2069,9 @@ function addRuleRow() {
 
     const newType = availableTypes[0];
     const defaults = {
-        single: { count: 10, score: 2, timeLimit: 15 },
-        multiple: { count: 5, score: 4, timeLimit: 30 },
-        judge: { count: 10, score: 2, timeLimit: 20 }
+        single: { count: 10, score: 2, timeLimit: 15, mustCount: 0 },
+        multiple: { count: 5, score: 4, timeLimit: 30, mustCount: 0 },
+        judge: { count: 10, score: 2, timeLimit: 20, mustCount: 0 }
     };
 
     const id = Date.now();
@@ -2031,6 +2081,7 @@ function addRuleRow() {
         count: defaults[newType].count,
         score: defaults[newType].score,
         partialScore: 0,
+        mustCount: defaults[newType].mustCount,
         timeLimit: defaults[newType].timeLimit
     });
     updateRulesTable();
@@ -2044,6 +2095,9 @@ function updateRulesTable() {
     const usedTypes = paperRules.map(r => r.type);
 
     tbody.innerHTML = paperRules.map((rule, idx) => {
+        if (rule.mustCount == null) {
+            rule.mustCount = 0;
+        }
         const availableForThis = ['single', 'multiple', 'judge'].filter(t =>
             t === rule.type || !usedTypes.includes(t)
         );
@@ -2060,6 +2114,7 @@ function updateRulesTable() {
             <td style="text-align:center;">${rule.type === 'multiple'
                 ? `<input type="number" class="form-input" style="width:70px;text-align:center;" value="${rule.partialScore}" min="0" max="${rule.score}" onchange="updateRule(${rule.id}, 'partialScore', this.value)">`
                 : '<span class="text-muted">-</span>'}</td>
+            <td style="text-align:center;"><input type="number" class="form-input" style="width:80px;text-align:center;" value="${rule.mustCount}" min="0" onchange="updateRule(${rule.id}, 'mustCount', this.value)"></td>
             <td style="text-align:center;"><input type="number" class="form-input" style="width:70px;text-align:center;" value="${rule.timeLimit}" min="5" onchange="updateRule(${rule.id}, 'timeLimit', this.value)"></td>
             <td style="text-align:center;">${rule.count * rule.score}</td>
             <td style="text-align:center;"><button class="btn btn-sm btn-danger" data-id="${rule.id}" onclick="safeOnclick(this, 'removeRule', ['id'])">删除</button></td>
@@ -2091,6 +2146,12 @@ function updateRule(id, field, value) {
             if (field === 'score' && rule.partialScore > rule.score) {
                 rule.partialScore = rule.score;
             }
+            if (field === 'count' && rule.mustCount > rule.count) {
+                rule.mustCount = rule.count;
+            }
+            if (field === 'mustCount' && rule.mustCount > rule.count) {
+                rule.mustCount = rule.count;
+            }
         }
         updateRulesTable();
         rulesValidated = false;
@@ -2099,7 +2160,8 @@ function updateRule(id, field, value) {
 }
 
 function removeRule(id) {
-    paperRules = paperRules.filter(r => r.id !== id);
+    const targetId = typeof id === 'string' ? Number(id) : id;
+    paperRules = paperRules.filter(r => r.id !== targetId);
     updateRulesTable();
     rulesValidated = false;
     disableGenerateButtons();
@@ -2133,12 +2195,28 @@ function validateRules() {
     }
 
     const questions = cachedData.questions;
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
     for (const rule of paperRules) {
-        const available = questions.filter(q => q.type === rule.type).length;
+        const pool = questions.filter(q => q.type === rule.type);
+        const available = pool.length;
+        const mustCount = rule.mustCount || 0;
+
         if (available < rule.count) {
-            const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
             showAlert(typeNames[rule.type] + '数量不足！需要' + rule.count + '题，题库仅有' + available + '题');
             return;
+        }
+
+        if (mustCount > rule.count) {
+            showAlert(typeNames[rule.type] + '必考题数量不能超过该题型总题数(' + rule.count + ')');
+            return;
+        }
+
+        if (mustCount > 0) {
+            const mustAvailable = pool.filter(q => q.must === 1).length;
+            if (mustAvailable < mustCount) {
+                showAlert(typeNames[rule.type] + '必考题数量不足！需要' + mustCount + '题，题库仅有' + mustAvailable + '道必考题');
+                return;
+            }
         }
     }
 
@@ -2155,9 +2233,17 @@ function showManualSelect() {
     let html = '<div class="flex gap-3 mb-4">';
     paperRules.forEach(rule => {
         if (!selectedQuestions[rule.type]) selectedQuestions[rule.type] = [];
-        const currentCount = selectedQuestions[rule.type].length;
-        html += `<button class="btn btn-secondary" data-type="${rule.type}" data-max="${rule.count}" onclick="safeOnclick(this, 'showQuestionSelector', ['type', 'max'])">
-            ${typeNames[rule.type]} (已选 <span id="selected-count-${rule.type}">${currentCount}</span>/${rule.count})
+        const selectedIds = selectedQuestions[rule.type];
+        const currentCount = selectedIds.length;
+        const mustCount = rule.mustCount || 0;
+        const mustSelected = selectedIds.filter(id => {
+            const q = cachedData.questions.find(item => item.id === id);
+            return q && q.must === 1;
+        }).length;
+
+        html += `<button class="btn btn-secondary" data-type="${rule.type}" data-max="${rule.count}" onclick="safeOnclick(this, 'showQuestionSelector', ['type', 'max'])" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;">
+            <span>${typeNames[rule.type]} (已选 <span id="selected-count-${rule.type}">${currentCount}</span>/${rule.count})</span>
+            <span style="font-size:12px;opacity:0.85;">必考题 (已选 <span id="selected-must-${rule.type}">${mustSelected}</span>/${mustCount})</span>
         </button>`;
     });
     html += '</div>';
@@ -2165,6 +2251,8 @@ function showManualSelect() {
 
     document.getElementById('manual-select-content').innerHTML = html;
     document.getElementById('manual-select-area').classList.remove('hidden');
+    const autoArea = document.getElementById('auto-generate-area');
+    if (autoArea) autoArea.classList.add('hidden');
 }
 
 let currentSelectorType = null;
@@ -2178,6 +2266,7 @@ function showQuestionSelector(type, maxCount) {
     selectorGroupFilter = 'all';
     selectorMajorFilter = 'all';
     selectorDeviceFilter = 'all';
+    selectorMustFilter = 'all';
     selectorKeywordFilter = '';
 
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
@@ -2234,6 +2323,22 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
+                <label class="form-label-sm">必考题</label>
+                <div class="dropdown-filter" id="selector-must-filter-dropdown" style="position:relative;">
+                    <button class="btn btn-sm btn-primary" id="btn-selector-must-filter"
+                        data-type="must" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
+                        style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                        <span id="selector-must-filter-label">全部题目</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="selector-must-filter-menu"
+                        style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
+                    </div>
+                </div>
+            </div>
+            <div class="filter-item">
                 <label class="form-label-sm">关键词</label>
                 <input type="text" class="form-input-sm" id="selector-filter-keyword" 
                     placeholder="搜索题目内容..." 
@@ -2277,6 +2382,12 @@ function renderQuestionSelectorTable(type, maxCount) {
         questions = questions.filter(q => q.deviceType === selectorDeviceFilter);
     }
 
+    if (selectorMustFilter === 'must') {
+        questions = questions.filter(q => q.must === 1);
+    } else if (selectorMustFilter === 'not_must') {
+        questions = questions.filter(q => !q.must);
+    }
+
     if (selectorKeywordFilter) {
         const keyword = selectorKeywordFilter.toLowerCase();
         questions = questions.filter(q => q.content.toLowerCase().includes(keyword));
@@ -2293,6 +2404,7 @@ function renderQuestionSelectorTable(type, maxCount) {
         <th style="width:120px;">专业/设备</th>
         <th style="width:100px;white-space:nowrap;">题库归属</th>
         <th>题目</th>
+        <th style="width:80px;white-space:nowrap;text-align:center;">必考题</th>
         <th style="width:80px;white-space:nowrap;text-align:center;">操作</th>
     </tr></thead>
     <tbody>${questions.length ? questions.map(q => `
@@ -2305,10 +2417,11 @@ function renderQuestionSelectorTable(type, maxCount) {
             </td>
             <td style="white-space:nowrap;"><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
             <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(q.content)}">${escapeHtml(q.content)}</td>
+            <td style="text-align:center;white-space:nowrap;">${q.must === 1 ? '<span class="badge badge-success">是</span>' : '<span class="badge badge-secondary">否</span>'}</td>
             <td style="text-align:center;white-space:nowrap;">
                 <button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'viewQuestionDetail', ['id'])">查看</button>
             </td>
-        </tr>`).join('') : '<tr><td colspan="5" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
+        </tr>`).join('') : '<tr><td colspan="6" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
 }
 
 function toggleQuestion(type, questionId, maxCount, checked) {
@@ -2326,6 +2439,147 @@ function toggleQuestion(type, questionId, maxCount, checked) {
     }
 
     document.getElementById(`selected-count-${type}`).textContent = selectedQuestions[type].length;
+
+    const mustSpan = document.getElementById(`selected-must-${type}`);
+    if (mustSpan) {
+        const ids = selectedQuestions[type];
+        const mustSelected = ids.filter(id => {
+            const q = cachedData.questions.find(item => item.id === id);
+            return q && q.must === 1;
+        }).length;
+        mustSpan.textContent = mustSelected;
+    }
+}
+
+function showAutoConfig(type) {
+    const container = document.getElementById('auto-config-area');
+    if (!container) return;
+
+    const questions = cachedData.questions.filter(q => q.type === type);
+    const cfg = autoGenerateConfig[type] || { groups: {}, majors: {}, devices: {} };
+    autoGenerateConfig[type] = cfg;
+
+    const groupSet = new Set();
+    const majorSet = new Set();
+    const deviceSet = new Set();
+
+    questions.forEach(q => {
+        const gKey = q.groupId || 'public';
+        groupSet.add(gKey);
+        if (q.category) majorSet.add(q.category);
+        if (q.deviceType) deviceSet.add(q.deviceType);
+    });
+
+    const groups = Array.from(groupSet).map(id => {
+        const name = id === 'public'
+            ? '公共题库'
+            : (cachedData.groups.find(g => g.id === id)?.name || id);
+        return { id, name };
+    });
+
+    const majors = Array.from(majorSet).map(id => {
+        const name = cachedData.categories.find(c => c.id === id)?.name || id;
+        return { id, name };
+    });
+
+    const devices = Array.from(deviceSet).map(id => {
+        const name = cachedData.categories.find(c => c.id === id)?.name || id;
+        return { id, name };
+    });
+
+    const renderRows = (items, dim, map) => {
+        if (!items.length) {
+            return '<tr><td colspan="2" class="text-muted" style="text-align:center;">无可用数据</td></tr>';
+        }
+        return items.map(item => {
+            const val = map && map[item.id] != null ? map[item.id] : '';
+            return `<tr>
+                <td style="padding:6px 8px;">${escapeHtml(item.name)}</td>
+                <td style="padding:6px 8px;width:120px;">
+                    <input type="number" class="form-input" style="width:100%;text-align:center;"
+                        min="0" step="1"
+                        value="${val}"
+                        onchange="updateAutoConfig('${type}','${dim}','${item.id}', this.value)">
+                </td>
+            </tr>`;
+        }).join('');
+    };
+
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+
+    container.innerHTML = `
+        <div class="auto-config-section">
+            <h4 style="margin-bottom:12px;">${typeNames[type]}自动生成配置</h4>
+            <div class="flex gap-4 flex-wrap">
+                <div style="flex:1;min-width:260px;">
+                    <h5 style="font-size:14px;margin-bottom:8px;">题库归属比例</h5>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">题库</th>
+                                    <th style="text-align:center;">比例</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${renderRows(groups, 'groups', cfg.groups)}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="flex:1;min-width:260px;">
+                    <h5 style="font-size:14px;margin-bottom:8px;">专业比例</h5>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">专业</th>
+                                    <th style="text-align:center;">比例</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${renderRows(majors, 'majors', cfg.majors)}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="flex:1;min-width:260px;">
+                    <h5 style="font-size:14px;margin-bottom:8px;">设备类型比例</h5>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">设备类型</th>
+                                    <th style="text-align:center;">比例</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${renderRows(devices, 'devices', cfg.devices)}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <p style="margin-top:8px;font-size:12px;color:var(--text-secondary);">
+                比例为权重值，可为 0 或任意正整数；为空视为未设置，将按平均概率选择。
+            </p>
+        </div>
+    `;
+}
+
+function updateAutoConfig(type, dim, id, value) {
+    if (!autoGenerateConfig[type]) {
+        autoGenerateConfig[type] = { groups: {}, majors: {}, devices: {} };
+    }
+    const cfg = autoGenerateConfig[type];
+    const target = cfg[dim];
+    if (!target) return;
+    const v = parseInt(value, 10);
+    if (isNaN(v) || v <= 0) {
+        delete target[id];
+    } else {
+        target[id] = v;
+    }
 }
 
 function viewQuestionDetail(id) {
@@ -2411,12 +2665,26 @@ async function generatePaperFromSelection() {
     const passScoreVal = document.getElementById('paper-pass-score')?.value;
     const passScore = passScoreVal === '' ? 0 : Number(passScoreVal);
 
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+
     for (const rule of paperRules) {
-        const count = (selectedQuestions[rule.type] || []).length;
+        const selectedIds = selectedQuestions[rule.type] || [];
+        const count = selectedIds.length;
         if (count !== rule.count) {
-            const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
             showAlert(`${typeNames[rule.type]}需要选择${rule.count}题，当前已选${count}题`);
             return;
+        }
+
+        const mustCount = rule.mustCount || 0;
+        if (mustCount > 0) {
+            const mustSelected = selectedIds.filter(id => {
+                const q = cachedData.questions.find(item => item.id === id);
+                return q && q.must === 1;
+            }).length;
+            if (mustSelected < mustCount) {
+                showAlert(`${typeNames[rule.type]}至少需要选择${mustCount}道必考题，当前仅选择${mustSelected}道`);
+                return;
+            }
         }
     }
 
@@ -2442,27 +2710,138 @@ async function generatePaperFromSelection() {
     loadPapers();
 }
 
-async function autoGeneratePaper() {
+function autoGeneratePaper() {
+    if (!rulesValidated) { showAlert('请先校验试卷规则'); return; }
+
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+
+    let html = '<div class="flex gap-3 mb-4">';
+    paperRules.forEach(rule => {
+        if (!autoGenerateConfig[rule.type]) {
+            autoGenerateConfig[rule.type] = { groups: {}, majors: {}, devices: {} };
+        }
+        html += `<button class="btn btn-secondary" data-type="${rule.type}" onclick="safeOnclick(this, 'showAutoConfig', ['type'])">
+            ${typeNames[rule.type]}
+        </button>`;
+    });
+    html += '</div>';
+    html += '<div id="auto-config-area"></div>';
+
+    const container = document.getElementById('auto-generate-content');
+    if (container) container.innerHTML = html;
+    const area = document.getElementById('auto-generate-area');
+    if (area) area.classList.remove('hidden');
+    const manualArea = document.getElementById('manual-select-area');
+    if (manualArea) manualArea.classList.add('hidden');
+}
+
+async function doAutoGeneratePaper() {
     if (!rulesValidated) { showAlert('请先校验试卷规则'); return; }
 
     const name = document.getElementById('paper-name').value.trim();
-    const questions = cachedData.questions;
-    const generatedQuestions = {};
+    if (!name) { showAlert('请输入试卷名称'); return; }
     const shuffleQuestions = document.getElementById('paper-shuffle-questions')?.checked || false;
     const shuffleOptions = document.getElementById('paper-shuffle-options')?.checked || false;
     const passScoreVal = document.getElementById('paper-pass-score')?.value;
     const passScore = passScoreVal === '' ? 0 : Number(passScoreVal);
 
+    const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
+    const allQuestionsPool = cachedData.questions;
+    const autoSelected = {};
+
+    const getDimWeight = (map, key) => {
+        if (!map || Object.keys(map).length === 0) return 1;
+        if (!key) return 1;
+        const w = map[key];
+        return typeof w === 'number' && w > 0 ? w : 1;
+    };
+
+    const pickWeighted = (list, cfg, count) => {
+        if (!list.length || count <= 0) return [];
+        if (list.length <= count) return list.map(q => q.id);
+        const items = list.slice();
+        const weights = items.map(q =>
+            getDimWeight(cfg.groups, q.groupId || 'public') *
+            getDimWeight(cfg.majors, q.category) *
+            getDimWeight(cfg.devices, q.deviceType)
+        );
+        const selected = [];
+        for (let n = 0; n < count && items.length; n++) {
+            let total = 0;
+            for (let i = 0; i < weights.length; i++) total += weights[i];
+            let index = 0;
+            if (total <= 0) {
+                index = Math.floor(Math.random() * items.length);
+            } else {
+                let r = Math.random() * total;
+                for (let i = 0; i < weights.length; i++) {
+                    r -= weights[i];
+                    if (r <= 0) {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+            selected.push(items[index].id);
+            items.splice(index, 1);
+            weights.splice(index, 1);
+        }
+        return selected;
+    };
+
     for (const rule of paperRules) {
-        const pool = questions.filter(q => q.type === rule.type);
-        const shuffled = [...pool].sort(() => Math.random() - 0.5);
-        generatedQuestions[rule.type] = shuffled.slice(0, rule.count).map(q => q.id);
+        const pool = allQuestionsPool.filter(q => q.type === rule.type);
+        const totalCount = rule.count || 0;
+        const mustCount = rule.mustCount || 0;
+
+        if (pool.length < totalCount) {
+            showAlert(typeNames[rule.type] + '数量不足，无法自动生成');
+            return;
+        }
+
+        const mustPool = pool.filter(q => q.must === 1);
+        if (mustCount > mustPool.length) {
+            showAlert(typeNames[rule.type] + '必考题数量不足，无法自动生成');
+            return;
+        }
+
+        const cfg = autoGenerateConfig[rule.type] || { groups: {}, majors: {}, devices: {} };
+        autoGenerateConfig[rule.type] = cfg;
+
+        const selectedIds = [];
+        if (mustCount > 0) {
+            const mustSelected = pickWeighted(mustPool, cfg, mustCount);
+            if (mustSelected.length < mustCount) {
+                showAlert(typeNames[rule.type] + '必考题数量不足，无法自动生成');
+                return;
+            }
+            selectedIds.push(...mustSelected);
+        }
+
+        const remaining = totalCount - selectedIds.length;
+        if (remaining > 0) {
+            const remainingPool = pool.filter(q => !selectedIds.includes(q.id));
+            if (remainingPool.length < remaining) {
+                showAlert(typeNames[rule.type] + '数量不足，无法自动生成');
+                return;
+            }
+            const moreSelected = pickWeighted(remainingPool, cfg, remaining);
+            if (moreSelected.length < remaining) {
+                showAlert(typeNames[rule.type] + '数量不足，无法自动生成');
+                return;
+            }
+            selectedIds.push(...moreSelected);
+        }
+
+        autoSelected[rule.type] = selectedIds;
     }
+
+    selectedQuestions = autoSelected;
 
     const paper = {
         name,
         rules: paperRules,
-        questions: generatedQuestions,
+        questions: autoSelected,
         published: false,
         shuffleQuestions,
         shuffleOptions,
@@ -2474,7 +2853,7 @@ async function autoGeneratePaper() {
         showAlert('试卷更新成功！');
     } else {
         await Storage.addPaper(paper);
-        showAlert('试卷自动生成成功！');
+        showAlert('试卷创建成功！');
     }
     cancelPaperEdit();
     await refreshCache();

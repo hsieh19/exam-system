@@ -2318,6 +2318,10 @@ input:checked + .slider:before {
     min-width: 600px;
   }
 
+  #rules-table {
+    min-width: 0;
+  }
+
   /* 按钮组适应 */
   .flex.gap-3 {
     flex-wrap: wrap;
