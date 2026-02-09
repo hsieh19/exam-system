@@ -980,6 +980,255 @@ module.exports = function initRoutes(app, context) {
         res.json(await db.getRecordsByPaper(req.params.paperId));
     });
 
+    app.get('/api/exam-record/:id', adminMiddleware, async (req, res) => {
+        try {
+            const recordId = req.params.id;
+            const records = await db.getRecords();
+            const record = records.find(r => r.id === recordId);
+            if (!record) {
+                return res.status(404).json({ error: '考试记录不存在' });
+            }
+
+            const user = await db.getUserById(record.userId);
+            const paper = await db.getPaperById(record.paperId);
+            if (!paper) {
+                return res.status(404).json({ error: '试卷不存在' });
+            }
+
+            const allQuestions = await db.getQuestions();
+            const questionMap = new Map();
+            allQuestions.forEach(q => {
+                questionMap.set(q.id, q);
+            });
+
+            const letterChars = 'ABCDEFGH';
+            const hashString = (str) => {
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const chr = str.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + chr;
+                    hash |= 0;
+                }
+                return hash;
+            };
+
+            const buildRulesMap = (rules) => {
+                if (Array.isArray(rules) && rules.length > 0) {
+                    const map = {};
+                    rules.forEach(rule => {
+                        if (!rule || !rule.type) {
+                            return;
+                        }
+                        map[rule.type] = {
+                            score: rule.score == null ? 0 : Number(rule.score),
+                            partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
+                            timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
+                        };
+                    });
+                    return map;
+                }
+                return {
+                    single: { score: 2, partialScore: 0, timeLimit: 15 },
+                    multiple: { score: 4, partialScore: 2, timeLimit: 30 },
+                    judge: { score: 2, partialScore: 0, timeLimit: 20 }
+                };
+            };
+
+            const rulesMap = buildRulesMap(paper.rules || []);
+
+            const normalizeAnswerValue = (answer) => {
+                if (!answer) {
+                    return answer;
+                }
+                if (Array.isArray(answer)) {
+                    return answer.slice();
+                }
+                if (typeof answer === 'string') {
+                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                    if (parts.length > 1) {
+                        return parts;
+                    }
+                    return answer;
+                }
+                return answer;
+            };
+
+            const recordAnswers = record.answers || {};
+            const detailedQuestions = [];
+
+            const questionTypes = ['single', 'multiple', 'judge'];
+            questionTypes.forEach(type => {
+                const ids = (paper.questions && paper.questions[type]) || [];
+                ids.forEach(id => {
+                    const q = questionMap.get(id);
+                    if (!q) {
+                        return;
+                    }
+
+                    const baseOptions = q.type === 'judge'
+                        ? ['正确', '错误']
+                        : Array.isArray(q.options) ? q.options : [];
+
+                    const optionItems = [];
+                    const letterMap = {};
+
+                    if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                        const indices = baseOptions.map((_, index) => index);
+                        indices.sort((a, b) => {
+                            const ha = hashString(String(record.userId) + q.id + String(a));
+                            const hb = hashString(String(record.userId) + q.id + String(b));
+                            if (ha === hb) {
+                                return a - b;
+                            }
+                            return ha - hb;
+                        });
+                        indices.forEach((origIndex, position) => {
+                            const label = letterChars[position] || '';
+                            const text = baseOptions[origIndex];
+                            optionItems.push({
+                                label,
+                                text
+                            });
+                            const originalLabel = letterChars[origIndex] || '';
+                            if (originalLabel) {
+                                letterMap[originalLabel] = label;
+                            }
+                        });
+                    } else {
+                        if (q.type === 'judge') {
+                            optionItems.push(
+                                { label: 'A', text: '正确' },
+                                { label: 'B', text: '错误' }
+                            );
+                        } else {
+                            baseOptions.forEach((text, index) => {
+                                const label = letterChars[index] || '';
+                                optionItems.push({
+                                    label,
+                                    text
+                                });
+                            });
+                        }
+                    }
+
+                    const originalAnswer = normalizeAnswerValue(q.answer);
+
+                    const mapAnswerWithLetterMap = (answer) => {
+                        if (!answer) {
+                            return answer;
+                        }
+                        if (Array.isArray(answer)) {
+                            return answer.map(value => {
+                                const mapped = letterMap[value];
+                                return mapped || value;
+                            });
+                        }
+                        if (typeof answer === 'string') {
+                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                            if (parts.length > 1) {
+                                return parts.map(value => {
+                                    const mapped = letterMap[value];
+                                    return mapped || value;
+                                });
+                            }
+                            const mapped = letterMap[answer];
+                            return mapped || answer;
+                        }
+                        return answer;
+                    };
+
+                    const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                        ? mapAnswerWithLetterMap(originalAnswer)
+                        : originalAnswer;
+
+                    const rawUserAnswer = recordAnswers[id];
+                    const ruleConfig = rulesMap[q.type] || {
+                        score: q.type === 'multiple' ? 4 : 2,
+                        partialScore: q.type === 'multiple' ? 2 : 0,
+                        timeLimit: null
+                    };
+
+                    let questionScore = 0;
+                    let isCorrect = false;
+
+                    const isEmptyAnswer = rawUserAnswer == null ||
+                        (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                        (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+
+                    if (!isEmptyAnswer) {
+                        if (q.type === 'multiple') {
+                            const correctList = Array.isArray(correctAnswerForStudent)
+                                ? correctAnswerForStudent.slice().sort()
+                                : [correctAnswerForStudent];
+                            const userList = Array.isArray(rawUserAnswer)
+                                ? rawUserAnswer.slice().sort()
+                                : [rawUserAnswer];
+
+                            const hasWrong = userList.some(value => !correctList.includes(value));
+                            if (!hasWrong) {
+                                if (userList.length === correctList.length &&
+                                    userList.every((value, index) => value === correctList[index])) {
+                                    questionScore = ruleConfig.score;
+                                    isCorrect = true;
+                                } else if (userList.length < correctList.length &&
+                                    userList.every(value => correctList.includes(value))) {
+                                    questionScore = ruleConfig.partialScore || 0;
+                                }
+                            }
+                        } else {
+                            if (rawUserAnswer === correctAnswerForStudent) {
+                                questionScore = ruleConfig.score;
+                                isCorrect = true;
+                            }
+                        }
+                    }
+
+                    detailedQuestions.push({
+                        id: q.id,
+                        type: q.type,
+                        content: q.content,
+                        options: optionItems,
+                        studentAnswer: rawUserAnswer,
+                        correctAnswer: correctAnswerForStudent,
+                        score: questionScore,
+                        maxScore: ruleConfig.score,
+                        isCorrect
+                    });
+                });
+            });
+
+            const passScore = paper.passScore == null ? 0 : Number(paper.passScore);
+            const passed = passScore > 0 ? record.score >= passScore : true;
+
+            const response = {
+                id: record.id,
+                paper: {
+                    id: paper.id,
+                    name: paper.name,
+                    passScore
+                },
+                user: {
+                    id: record.userId,
+                    username: user && user.username ? user.username : '未知用户'
+                },
+                summary: {
+                    score: record.score,
+                    totalTime: record.totalTime,
+                    submitDate: record.submitDate,
+                    totalQuestions: detailedQuestions.length,
+                    passScore,
+                    passed
+                },
+                questions: detailedQuestions
+            };
+
+            res.json(response);
+        } catch (e) {
+            console.error('获取考试记录详情失败:', e);
+            res.status(500).json({ error: '获取考试记录详情失败' });
+        }
+    });
+
     app.delete('/api/records/paper/:paperId', adminMiddleware, async (req, res) => {
         await db.deleteRecordsByPaper(req.params.paperId);
         res.json({ success: true });
@@ -1089,6 +1338,320 @@ module.exports = function initRoutes(app, context) {
             ranking: rankedList,
             passScore: paper.passScore == null ? 0 : Number(paper.passScore)
         });
+    });
+
+    app.get('/api/analysis/questions/:paperId', adminMiddleware, async (req, res) => {
+        try {
+            const paperId = req.params.paperId;
+            const paper = await db.getPaperById(paperId);
+            if (!paper) {
+                return res.status(404).json({ error: '试卷不存在' });
+            }
+            if (req.user.role !== 'super_admin') {
+                const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
+                const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
+                const inGroup = req.user.groupId ? targetGroups.includes(req.user.groupId) : false;
+                const inUsers = targetUsers.includes(req.user.id);
+                if (req.user.role === 'group_admin') {
+                    const canSee = paper.creatorId === req.user.id || inGroup || inUsers;
+                    if (!canSee) {
+                        return res.status(403).json({ error: '无权分析该试卷' });
+                    }
+                } else {
+                    if (!inGroup && !inUsers) {
+                        return res.status(403).json({ error: '无权分析该试卷' });
+                    }
+                }
+            }
+            const records = await db.getRecordsByPaper(paperId);
+            if (!records || records.length === 0) {
+                return res.json({ paperId, questions: [] });
+            }
+
+            // 获取试卷中的所有题目 ID
+            const paperQuestionIds = [];
+            const questionTypes = ['single', 'multiple', 'judge'];
+            questionTypes.forEach(type => {
+                const ids = paper.questions && paper.questions[type];
+                if (Array.isArray(ids)) {
+                    paperQuestionIds.push(...ids);
+                } else if (ids) {
+                    paperQuestionIds.push(ids);
+                }
+            });
+
+            if (paperQuestionIds.length === 0) {
+                return res.json({ paperId, questions: [] });
+            }
+
+            // 只获取试卷相关的题目，避免全量查询性能问题
+            const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
+            const questionMap = new Map();
+            allQuestions.forEach(q => {
+                questionMap.set(q.id, q);
+            });
+            const letterChars = 'ABCDEFGH';
+            const hashString = (str) => {
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const chr = str.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + chr;
+                    hash |= 0;
+                }
+                return hash;
+            };
+            const buildRulesMap = (rules) => {
+                if (Array.isArray(rules) && rules.length > 0) {
+                    const map = {};
+                    rules.forEach(rule => {
+                        if (!rule || !rule.type) {
+                            return;
+                        }
+                        map[rule.type] = {
+                            score: rule.score == null ? 0 : Number(rule.score),
+                            partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
+                            timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
+                        };
+                    });
+                    return map;
+                }
+                return {
+                    single: { score: 2, partialScore: 0, timeLimit: 15 },
+                    multiple: { score: 4, partialScore: 2, timeLimit: 30 },
+                    judge: { score: 2, partialScore: 0, timeLimit: 20 }
+                };
+            };
+            const normalizeAnswerValue = (answer) => {
+                if (!answer) {
+                    return answer;
+                }
+                if (Array.isArray(answer)) {
+                    return answer.slice();
+                }
+                if (typeof answer === 'string') {
+                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                    if (parts.length > 1) {
+                        return parts;
+                    }
+                    return answer;
+                }
+                return answer;
+            };
+            const formatAnswerKey = (answer) => {
+                if (answer == null) {
+                    return '未作答';
+                }
+                if (Array.isArray(answer)) {
+                    if (answer.length === 0) {
+                        return '未作答';
+                    }
+                    const sorted = answer.slice().sort();
+                    return sorted.join(',');
+                }
+                if (typeof answer === 'string') {
+                    const trimmed = answer.trim();
+                    if (!trimmed) {
+                        return '未作答';
+                    }
+                    return trimmed;
+                }
+                return String(answer);
+            };
+            const rulesMap = buildRulesMap(paper.rules || []);
+            const statsMap = new Map();
+            questionTypes.forEach(type => {
+                let ids = (paper.questions && paper.questions[type]) || [];
+                if (!Array.isArray(ids)) {
+                    ids = [ids];
+                }
+                ids.forEach(id => {
+                    const q = questionMap.get(id);
+                    if (!q) {
+                        return;
+                    }
+                    if (statsMap.has(id)) {
+                        return;
+                    }
+                    const optionsForDisplay = [];
+                    if (q.type === 'judge') {
+                        optionsForDisplay.push(
+                            { label: 'A', text: '正确' },
+                            { label: 'B', text: '错误' }
+                        );
+                    } else {
+                        const baseOptions = Array.isArray(q.options) ? q.options : [];
+                        baseOptions.forEach((text, index) => {
+                            const label = letterChars[index] || '';
+                            optionsForDisplay.push({
+                                label,
+                                text
+                            });
+                        });
+                    }
+                    statsMap.set(id, {
+                        id: q.id,
+                        type: q.type,
+                        content: q.content,
+                        options: optionsForDisplay,
+                        totalCount: 0,
+                        correctCount: 0,
+                        wrongCount: 0,
+                        wrongAnswerDistribution: {}
+                    });
+                });
+            });
+            if (statsMap.size === 0) {
+                return res.json({ paperId, questions: [] });
+            }
+            const baseOptionsCache = new Map();
+            const getBaseOptions = (q) => {
+                const cached = baseOptionsCache.get(q.id);
+                if (cached) {
+                    return cached;
+                }
+                let baseOptions;
+                if (q.type === 'judge') {
+                    baseOptions = ['正确', '错误'];
+                } else {
+                    baseOptions = Array.isArray(q.options) ? q.options : [];
+                }
+                baseOptionsCache.set(q.id, baseOptions);
+                return baseOptions;
+            };
+            const questionIdList = Array.from(statsMap.keys());
+            records.forEach(record => {
+                const recordAnswers = record.answers || {};
+                questionIdList.forEach(id => {
+                    const q = questionMap.get(id);
+                    if (!q) {
+                        return;
+                    }
+                    const stats = statsMap.get(id);
+                    const baseOptions = getBaseOptions(q);
+                    const optionLetterMap = {};
+                    if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                        const indices = baseOptions.map((_, index) => index);
+                        indices.sort((a, b) => {
+                            const ha = hashString(String(record.userId) + q.id + String(a));
+                            const hb = hashString(String(record.userId) + q.id + String(b));
+                            if (ha === hb) {
+                                return a - b;
+                            }
+                            return ha - hb;
+                        });
+                        indices.forEach((origIndex, position) => {
+                            const originalLabel = letterChars[origIndex] || '';
+                            const label = letterChars[position] || '';
+                            if (originalLabel && label) {
+                                optionLetterMap[originalLabel] = label;
+                            }
+                        });
+                    }
+                    const originalAnswer = normalizeAnswerValue(q.answer);
+                    const mapAnswerWithLetterMap = (answer) => {
+                        if (!answer) {
+                            return answer;
+                        }
+                        if (Array.isArray(answer)) {
+                            return answer.map(value => {
+                                const mapped = optionLetterMap[value];
+                                return mapped || value;
+                            });
+                        }
+                        if (typeof answer === 'string') {
+                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                            if (parts.length > 1) {
+                                return parts.map(value => {
+                                    const mapped = optionLetterMap[value];
+                                    return mapped || value;
+                                });
+                            }
+                            const mapped = optionLetterMap[answer];
+                            return mapped || answer;
+                        }
+                        return answer;
+                    };
+                    const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                        ? mapAnswerWithLetterMap(originalAnswer)
+                        : originalAnswer;
+                    const rawUserAnswer = recordAnswers[id];
+                    const ruleConfig = rulesMap[q.type] || {
+                        score: q.type === 'multiple' ? 4 : 2,
+                        partialScore: q.type === 'multiple' ? 2 : 0,
+                        timeLimit: null
+                    };
+                    const isEmptyAnswer = rawUserAnswer == null ||
+                        (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                        (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+                    if (isEmptyAnswer) {
+                        stats.totalCount += 1;
+                        stats.wrongCount += 1;
+                        const key = formatAnswerKey(rawUserAnswer);
+                        const dist = stats.wrongAnswerDistribution;
+                        dist[key] = (dist[key] || 0) + 1;
+                        return;
+                    }
+                    let isCorrect = false;
+                    if (q.type === 'multiple') {
+                        const correctList = Array.isArray(correctAnswerForStudent)
+                            ? correctAnswerForStudent.slice().sort()
+                            : [correctAnswerForStudent];
+                        const userList = Array.isArray(rawUserAnswer)
+                            ? rawUserAnswer.slice().sort()
+                            : [rawUserAnswer];
+                        const hasWrong = userList.some(value => !correctList.includes(value));
+                        if (!hasWrong) {
+                            if (userList.length === correctList.length &&
+                                userList.every((value, index) => value === correctList[index])) {
+                                isCorrect = true;
+                            } else if (userList.length < correctList.length &&
+                                userList.every(value => correctList.includes(value))) {
+                                if ((ruleConfig.partialScore || 0) > 0) {
+                                    isCorrect = false;
+                                }
+                            }
+                        }
+                    } else {
+                        if (rawUserAnswer === correctAnswerForStudent) {
+                            isCorrect = true;
+                        }
+                    }
+                    stats.totalCount += 1;
+                    if (isCorrect) {
+                        stats.correctCount += 1;
+                    } else {
+                        stats.wrongCount += 1;
+                        const key = formatAnswerKey(rawUserAnswer);
+                        const dist = stats.wrongAnswerDistribution;
+                        dist[key] = (dist[key] || 0) + 1;
+                    }
+                });
+            });
+            const questions = Array.from(statsMap.values()).map(item => {
+                const total = item.totalCount;
+                const correctRate = total === 0 ? 0 : item.correctCount / total;
+                return {
+                    id: item.id,
+                    type: item.type,
+                    content: item.content,
+                    options: item.options,
+                    totalCount: item.totalCount,
+                    correctCount: item.correctCount,
+                    wrongCount: item.wrongCount,
+                    correctRate,
+                    wrongAnswerDistribution: item.wrongAnswerDistribution
+                };
+            });
+            res.json({ paperId, questions });
+        } catch (e) {
+            console.error('题目分析失败详情:', {
+                message: e.message,
+                stack: e.stack,
+                paperId: req.params.paperId,
+                userId: req.user ? req.user.id : 'unknown'
+            });
+            res.status(500).json({ error: '题目分析失败: ' + e.message });
+        }
     });
 
     // ==================== 考试数据接口（考生端） ====================

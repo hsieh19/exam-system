@@ -138,6 +138,8 @@ function initNavigation() {
         else {
             document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><h3>请选择试卷以生成分析报告</h3></div>';
             document.getElementById('btn-clear-records').style.display = 'none';
+            const qaBtn = document.getElementById('btn-question-analysis');
+            if (qaBtn) qaBtn.style.display = 'none';
         }
     });
 }
@@ -3027,14 +3029,152 @@ async function loadAdminRanking(paperId) {
         return;
     }
 
-    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>成绩</th><th>用时</th><th style="width:180px;">交卷时间</th></tr></thead>
+    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>成绩</th><th>用时</th><th style="width:180px;">交卷时间</th><th style="width:120px;">阅卷查看</th></tr></thead>
     <tbody>${ranking.map(r => {
         const passed = passScore > 0 ? r.score >= passScore : true;
         const label = passed ? '及格' : '不及格';
         const cls = passed ? 'text-success' : 'text-danger';
         return `<tr><td>${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `${r.rank}/${totalAssigned}`}</td>
-      <td>${r.username}</td><td><strong>${r.score}</strong></td><td><span class="${cls}">${label}</span></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td></tr>`;
+      <td>${r.username}</td><td><strong>${r.score}</strong></td><td><span class="${cls}">${label}</span></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td><td><button class="btn btn-sm btn-secondary" data-record-id="${r.id}" onclick="safeOnclick(this, 'showExamRecordDetail', ['recordId'])">查看详情</button></td></tr>`;
     }).join('')}</tbody></table>`;
+}
+
+async function showExamRecordDetail(el, recordId) {
+    if (!recordId) return;
+    const btn = el;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '加载中...';
+    try {
+        const detail = await Storage.getExamRecord(recordId);
+        if (!detail || !detail.questions || !detail.questions.length) {
+            showAlert('未找到该次考试的详细记录');
+            return;
+        }
+
+        const typeNames = {
+            single: '单选题',
+            multiple: '多选题',
+            judge: '判断题'
+        };
+
+        const normalizeAnswerList = (value) => {
+            if (value === null || value === undefined) return [];
+            if (Array.isArray(value)) return value.map(String);
+            const str = String(value).trim();
+            if (!str) return [];
+            const parts = str.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+            if (parts.length > 1) return parts;
+            return [str];
+        };
+
+        const renderAnswerText = (value) => {
+            const list = normalizeAnswerList(value);
+            if (!list.length) return '未作答';
+            return list.join('、');
+        };
+
+        const summary = detail.summary || {};
+        const username = detail.user && detail.user.username ? detail.user.username : '';
+        const paperName = detail.paper && detail.paper.name ? detail.paper.name : '';
+        const passScore = summary.passScore != null
+            ? Number(summary.passScore)
+            : (detail.paper && detail.paper.passScore != null ? Number(detail.paper.passScore) : 0);
+        const scoreValue = summary.score != null ? Number(summary.score) : null;
+        let passedFlag = null;
+        if (scoreValue != null) {
+            if (passScore > 0) {
+                passedFlag = scoreValue >= passScore;
+            } else {
+                passedFlag = true;
+            }
+        }
+
+        let resultHtml = '';
+        if (passedFlag === true) {
+            resultHtml = `<span class="exam-detail-summary-result exam-detail-summary-result-pass">已及格</span>`;
+        } else if (passedFlag === false) {
+            resultHtml = `<span class="exam-detail-summary-result exam-detail-summary-result-fail">未及格</span>`;
+        }
+
+        const headerHtml = `
+            <div class="exam-detail-summary">
+                <div class="exam-detail-summary-main">
+                    <div class="exam-detail-summary-title">
+                        <span class="exam-detail-summary-paper">${escapeHtml(paperName)}</span>
+                        <span class="exam-detail-summary-user">考生：${escapeHtml(username)}</span>
+                        ${resultHtml}
+                    </div>
+                    <div class="exam-detail-summary-meta">
+                        <span>总分：<strong>${summary.score != null ? summary.score : '-'}</strong></span>
+                        <span>用时：${summary.totalTime != null ? formatDuration(summary.totalTime, true) : '-'}</span>
+                        <span>交卷时间：${summary.submitDate ? formatFullDateTime(summary.submitDate) : '-'}</span>
+                        <span>题目数：${summary.totalQuestions != null ? summary.totalQuestions : (detail.questions ? detail.questions.length : 0)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const questionsHtml = detail.questions.map((q, index) => {
+            const questionIndex = index + 1;
+            const typeLabel = typeNames[q.type] || '';
+
+            const correctList = normalizeAnswerList(q.correctAnswer);
+
+            const optionsHtml = (q.options || []).map(opt => {
+                const isCorrectOption = correctList.includes(String(opt.label));
+                const optionClass = isCorrectOption ? 'exam-option exam-option-correct' : 'exam-option';
+                return `
+                    <div class="${optionClass}">
+                        <span class="exam-option-label">${escapeHtml(opt.label || '')}</span>
+                        <span class="exam-option-text">${escapeHtml(opt.text || '')}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const studentText = renderAnswerText(q.studentAnswer);
+            const correctText = renderAnswerText(q.correctAnswer);
+            const isCorrect = !!q.isCorrect;
+            const answerRowClass = isCorrect ? 'exam-answer-row exam-answer-correct' : 'exam-answer-row exam-answer-wrong';
+
+            return `
+                <div class="exam-question-block">
+                    <div class="exam-question-row exam-question-title">
+                        <span class="exam-question-index">${questionIndex}.</span>
+                        <span class="exam-question-type">${typeLabel ? '【' + typeLabel + '】' : ''}</span>
+                        <span class="exam-question-content">${escapeHtml(q.content || '')}</span>
+                    </div>
+                    <div class="exam-question-row exam-question-options">
+                        ${optionsHtml || '<span class="exam-no-options">本题无选项</span>'}
+                    </div>
+                    <div class="${answerRowClass}">
+                        <span class="exam-answer-text">考生答案：${escapeHtml(studentText)}</span>
+                        <span class="exam-answer-text">正确答案：${escapeHtml(correctText)}</span>
+                        <span class="exam-answer-score">本题得分：<strong>${q.score != null ? q.score : 0}</strong> / ${q.maxScore != null ? q.maxScore : '-'}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        const bodyHtml = `
+            <div class="exam-detail-container">
+                ${headerHtml}
+                <div class="exam-detail-questions">
+                    ${questionsHtml}
+                </div>
+            </div>
+        `;
+
+        openModal('阅卷详情 - ' + escapeHtml(paperName || ''), bodyHtml, `
+            <button class="btn btn-secondary" onclick="closeModal()">关闭</button>
+        `);
+    } catch (e) {
+        console.error('加载考试详情失败', e);
+        showAlert('加载考试详情失败，请稍后重试');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 
@@ -3471,8 +3611,13 @@ async function loadAdminAnalysis(paperId) {
                 <p>该试卷暂无考试记录。推送总人数：${totalAssigned}</p>
             </div>`;
         document.getElementById('btn-clear-records').style.display = 'none';
+        const qaBtn = document.getElementById('btn-question-analysis');
+        if (qaBtn) qaBtn.style.display = 'none';
         return;
     }
+
+    const qaBtn = document.getElementById('btn-question-analysis');
+    if (qaBtn) qaBtn.style.display = 'inline-block';
 
     // 计算统计数据
     const scores = ranking.map(r => r.score);
@@ -3574,6 +3719,80 @@ async function loadAdminAnalysis(paperId) {
 
     document.getElementById('analysis-content').innerHTML = html;
     document.getElementById('btn-clear-records').style.display = 'block';
+}
+
+async function showQuestionAccuracy() {
+    const select = document.getElementById('analysis-paper-select');
+    const paperId = select ? select.value : '';
+    if (!paperId) {
+        showAlert('请选择要分析的试卷');
+        return;
+    }
+    try {
+        const res = await authFetch(`${API_BASE}/api/analysis/questions/${paperId}`);
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || '服务器内部错误');
+        }
+        const list = Array.isArray(data.questions) ? data.questions : [];
+        if (list.length === 0) {
+            openModal('题目正确率分析', '<div class="empty-state"><p>该试卷暂无题目统计数据</p></div>', '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>');
+            return;
+        }
+        const rowsHtml = list.map((q, index) => {
+            const total = q.totalCount || 0;
+            const correct = q.correctCount || 0;
+            const rateValue = total === 0 ? 0 : (correct * 100) / total;
+            const rateText = total === 0 ? '0%' : rateValue.toFixed(1) + '%';
+            const barWidth = Math.max(0, Math.min(100, rateValue));
+            const isLow = barWidth < 60;
+            const typeLabel = q.type === 'single' ? '单选题' : q.type === 'multiple' ? '多选题' : q.type === 'judge' ? '判断题' : q.type || '';
+            const fullContent = q.content || '';
+            const trimmedContent = fullContent.length > 60 ? fullContent.slice(0, 60) + '...' : fullContent;
+            const rateColor = isLow ? 'var(--danger)' : 'var(--primary)';
+            return `
+                <tr>
+                    <td style="width:64px;text-align:center;">${index + 1}</td>
+                    <td title="${escapeHtml(fullContent)}" style="max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(trimmedContent)}</td>
+                    <td style="width:90px;text-align:center;">${typeLabel}</td>
+                    <td style="width:140px;text-align:center;">${correct} / ${total}</td>
+                    <td style="min-width:200px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <div class="accuracy-bar-bg">
+                                <div class="accuracy-bar-fill" style="width:${barWidth}%;"></div>
+                            </div>
+                            <div style="min-width:60px;text-align:right;font-variant-numeric:tabular-nums;color:${rateColor};">${rateText}</div>
+                        </div>
+                    </td>
+                </tr>`;
+        }).join('');
+        const tableHtml = `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:64px;text-align:center;">序号</th>
+                            <th>题目内容</th>
+                            <th style="width:90px;text-align:center;">题型</th>
+                            <th style="width:140px;text-align:center;">正确次数/总次数</th>
+                            <th style="min-width:200px;">正确率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            </div>`;
+        const bodyHtml = `
+            <div style="max-height:60vh;overflow:auto;">
+                ${tableHtml}
+            </div>`;
+        const footerHtml = '<button class="btn btn-secondary" onclick="closeModal()">关闭</button>';
+        openModal('题目正确率分析', bodyHtml, footerHtml);
+    } catch (e) {
+        console.error(e);
+        showAlert('获取题目分析数据失败');
+    }
 }
 
 async function clearPaperRecords() {

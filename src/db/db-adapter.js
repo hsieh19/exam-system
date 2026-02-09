@@ -1034,6 +1034,12 @@ module.exports = {
         const params = [];
         const conditions = [];
 
+        if (filter.ids && Array.isArray(filter.ids) && filter.ids.length > 0) {
+            const placeholders = filter.ids.map(() => "?").join(",");
+            conditions.push(`id IN (${placeholders})`);
+            params.push(...filter.ids);
+        }
+
         if (filter.groupId !== undefined) {
             if (filter.includePublic) {
                 conditions.push("(groupId = ? OR groupId IS NULL)");
@@ -1050,12 +1056,28 @@ module.exports = {
         }
 
         const rows = await query(sql, params);
-        return rows.map(q => ({
-            ...q,
-            options: q.options ? JSON.parse(q.options) : [],
-            answer: q.answer ? JSON.parse(q.answer) : '',
-            must: q.must == null ? 0 : Number(q.must)
-        }));
+        return rows.map(q => {
+            let options = [];
+            let answer = '';
+            try {
+                options = q.options ? JSON.parse(q.options) : [];
+            } catch (e) {
+                console.error(`解析题目 ${q.id} options 失败:`, e);
+                options = [];
+            }
+            try {
+                answer = q.answer ? JSON.parse(q.answer) : '';
+            } catch (e) {
+                console.error(`解析题目 ${q.id} answer 失败:`, e);
+                answer = q.answer || '';
+            }
+            return {
+                ...q,
+                options,
+                answer,
+                must: q.must == null ? 0 : Number(q.must)
+            };
+        });
     },
     addQuestion: async (q) => {
         const id = q.id || generateId('q_');
@@ -1119,12 +1141,36 @@ module.exports = {
         const rows = await query("SELECT * FROM papers WHERE id = ?", [id]);
         if (rows.length === 0) return null;
         const p = rows[0];
+        let questions = {};
+        let rules = [];
+        let targetGroups = [];
+        let targetUsers = [];
+        try {
+            questions = p.questions ? JSON.parse(p.questions) : {};
+        } catch (e) {
+            console.error(`解析试卷 ${id} questions 失败:`, e);
+        }
+        try {
+            rules = p.rules ? JSON.parse(p.rules) : [];
+        } catch (e) {
+            console.error(`解析试卷 ${id} rules 失败:`, e);
+        }
+        try {
+            targetGroups = p.targetGroups ? JSON.parse(p.targetGroups) : [];
+        } catch (e) {
+            console.error(`解析试卷 ${id} targetGroups 失败:`, e);
+        }
+        try {
+            targetUsers = p.targetUsers ? JSON.parse(p.targetUsers) : [];
+        } catch (e) {
+            console.error(`解析试卷 ${id} targetUsers 失败:`, e);
+        }
         return {
             ...p,
-            questions: p.questions ? JSON.parse(p.questions) : {},
-            rules: p.rules ? JSON.parse(p.rules) : [],
-            targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
-            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : [],
+            questions,
+            rules,
+            targetGroups,
+            targetUsers,
             shuffleQuestions: !!p.shuffleQuestions,
             shuffleOptions: !!p.shuffleOptions,
             passScore: p.passScore == null ? 0 : Number(p.passScore)
@@ -1168,10 +1214,18 @@ module.exports = {
     },
     getRecordsByPaper: async (paperId) => {
         const rows = await query("SELECT * FROM records WHERE paperId = ?", [paperId]);
-        return rows.map(r => ({
-            ...r,
-            answers: r.answers ? JSON.parse(r.answers) : {}
-        }));
+        return rows.map(r => {
+            let answers = {};
+            try {
+                answers = r.answers ? JSON.parse(r.answers) : {};
+            } catch (e) {
+                console.error(`解析记录 ${r.id} answers 失败:`, e);
+            }
+            return {
+                ...r,
+                answers
+            };
+        });
     },
     addRecord: async (record) => {
         // 检查是否已存在记录，如果存在则更新（只保留最后一次成绩）

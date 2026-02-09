@@ -1798,6 +1798,220 @@ input:checked + .slider:before {
   gap: 12px;
 }
 
+.accuracy-bar-bg {
+  background: #334155;
+  width: 100px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.accuracy-bar-fill {
+  background: var(--success);
+  height: 100%;
+  border-radius: 4px;
+}
+
+/* ===========================
+   阅卷详情
+   =========================== */
+.exam-detail-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.exam-detail-summary {
+  margin-bottom: 8px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(120deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.04));
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
+.exam-detail-summary-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exam-detail-summary-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 15px;
+}
+
+.exam-detail-summary-paper {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.exam-detail-summary-user {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.exam-detail-summary-result {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin-left: auto;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.exam-detail-summary-result-pass {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(34, 197, 94, 0.6);
+}
+
+.exam-detail-summary-result-fail {
+  background-color: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(248, 113, 113, 0.7);
+}
+
+.exam-detail-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.exam-detail-summary-meta span {
+  white-space: nowrap;
+}
+
+.exam-detail-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.exam-detail-questions::-webkit-scrollbar {
+  width: 8px;
+}
+
+.exam-detail-questions::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.6);
+  border-radius: 4px;
+}
+
+.exam-detail-questions::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.exam-question-block {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.exam-question-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.exam-question-title {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.exam-question-index {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.exam-question-type {
+  color: var(--text-secondary);
+}
+
+.exam-question-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.exam-question-options {
+  margin-top: 2px;
+}
+
+.exam-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 2px 6px 2px 0;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background-color: rgba(15, 23, 42, 0.8);
+  font-size: 13px;
+}
+
+[data-theme="light"] .exam-option {
+  background-color: #f8fafc;
+}
+
+.exam-option-correct {
+  border-color: var(--success);
+  background-color: var(--success-bg);
+  color: var(--success);
+}
+
+.exam-option-label {
+  font-weight: 600;
+}
+
+.exam-option-text {
+  white-space: nowrap;
+}
+
+.exam-no-options {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.exam-answer-row {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.exam-answer-text {
+  white-space: nowrap;
+}
+
+.exam-answer-score {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.exam-answer-correct {
+  color: var(--success);
+}
+
+.exam-answer-wrong {
+  color: var(--danger);
+}
+
+.exam-answer-wrong .exam-answer-score {
+  color: var(--danger);
+}
+
 /* ===========================
    题库编辑
    =========================== */

@@ -418,6 +418,9 @@ const Storage = {
   getRanking(paperId) {
     return authFetch(`${API_BASE}/api/ranking/${paperId}`).then(r => r.json());
   },
+  getExamRecord(recordId) {
+    return authFetch(`${API_BASE}/api/exam-record/${recordId}`).then(r => r.json());
+  },
   deletePaperRecords(paperId) {
     return authFetch(`${API_BASE}/api/records/paper/${paperId}`, {
       method: 'DELETE'

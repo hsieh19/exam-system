@@ -400,8 +400,11 @@
                         <select class="form-select" id="analysis-paper-select" style="min-width:220px;max-width:360px;">
                             <option value="">请选择要分析的试卷</option>
                         </select>
-                        <button class="btn btn-danger btn-sm" id="btn-clear-records" style="display:none;white-space:nowrap;padding:8px 18px;min-width:160px;text-align:center;"
-                            onclick="clearPaperRecords()">清空本次考试记录</button>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button class="btn btn-primary btn-sm" id="btn-question-analysis" style="display:none;" onclick="showQuestionAccuracy()">题目正确率分析</button>
+                            <button class="btn btn-danger btn-sm" id="btn-clear-records" style="display:none;white-space:nowrap;padding:8px 18px;min-width:160px;text-align:center;"
+                                onclick="clearPaperRecords()">清空本次考试记录</button>
+                        </div>
                     </div>
                     <div class="card-body" id="analysis-content">
                         <div class="empty-state">
@@ -554,6 +557,9 @@
             <div class="modal-footer" id="modal-footer"></div>
         </div>
     </div>
+
+    <!-- 阅卷详情模态内容容器（初始隐藏，用于保证在弱网环境下结构可用） -->
+    <div id="exam-detail-modal-container" style="display:none;"></div>
 
     <script src="js/theme.js?v=2"></script>
     <script src="js/storage.js"></script>
