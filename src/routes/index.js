@@ -1280,6 +1280,154 @@ module.exports = function initRoutes(app, context) {
             if (!session) return res.status(400).json({ error: '考试会话不存在或已结束，请重新进入考试后提交' });
 
             const record = { ...(req.body || {}), id: generateId('r_'), userId };
+
+            try {
+                const paperQuestionIds = [];
+                const questionTypes = ['single', 'multiple', 'judge'];
+                questionTypes.forEach(type => {
+                    const ids = paper.questions && paper.questions[type];
+                    if (Array.isArray(ids)) {
+                        paperQuestionIds.push(...ids);
+                    } else if (ids) {
+                        paperQuestionIds.push(ids);
+                    }
+                });
+
+                if (paperQuestionIds.length > 0 && record.answers) {
+                    const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
+                    const questionMap = new Map();
+                    allQuestions.forEach(q => {
+                        if (q && q.id) {
+                            questionMap.set(q.id, q);
+                        }
+                    });
+
+                    const letterChars = 'ABCDEFGH';
+                    const hashString = (str) => {
+                        let hash = 0;
+                        if (!str) return hash;
+                        for (let i = 0; i < str.length; i++) {
+                            const chr = str.charCodeAt(i);
+                            hash = ((hash << 5) - hash) + chr;
+                            hash |= 0;
+                        }
+                        return hash;
+                    };
+                    const normalizeAnswerValue = (answer) => {
+                        if (!answer) {
+                            return answer;
+                        }
+                        if (Array.isArray(answer)) {
+                            return answer.slice();
+                        }
+                        if (typeof answer === 'string') {
+                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                            if (parts.length > 1) {
+                                return parts;
+                            }
+                            return answer;
+                        }
+                        return answer;
+                    };
+
+                    const recordAnswers = record.answers || {};
+                    for (const id of paperQuestionIds) {
+                        const q = questionMap.get(id);
+                        if (!q) {
+                            continue;
+                        }
+
+                        const rawUserAnswer = recordAnswers[id];
+                        const isEmptyAnswer = rawUserAnswer == null ||
+                            (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                            (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+
+                        let isCorrect = false;
+                        if (!isEmptyAnswer) {
+                            let baseOptions;
+                            if (q.type === 'judge') {
+                                baseOptions = ['正确', '错误'];
+                            } else {
+                                baseOptions = Array.isArray(q.options) ? q.options : [];
+                            }
+
+                            const optionLetterMap = {};
+                            if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                                const indices = baseOptions.map((_, index) => index);
+                                indices.sort((a, b) => {
+                                    const ha = hashString(String(record.userId) + q.id + String(a));
+                                    const hb = hashString(String(record.userId) + q.id + String(b));
+                                    if (ha === hb) {
+                                        return a - b;
+                                    }
+                                    return ha - hb;
+                                });
+                                indices.forEach((origIndex, position) => {
+                                    const originalLabel = letterChars[origIndex] || '';
+                                    const label = letterChars[position] || '';
+                                    if (originalLabel && label) {
+                                        optionLetterMap[originalLabel] = label;
+                                    }
+                                });
+                            }
+
+                            const originalAnswer = normalizeAnswerValue(q.answer);
+                            const mapAnswerWithLetterMap = (answer) => {
+                                if (!answer) {
+                                    return answer;
+                                }
+                                if (Array.isArray(answer)) {
+                                    return answer.map(value => {
+                                        const mapped = optionLetterMap[value];
+                                        return mapped || value;
+                                    });
+                                }
+                                if (typeof answer === 'string') {
+                                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                                    if (parts.length > 1) {
+                                        return parts.map(value => {
+                                            const mapped = optionLetterMap[value];
+                                            return mapped || value;
+                                        });
+                                    }
+                                    const mapped = optionLetterMap[answer];
+                                    return mapped || answer;
+                                }
+                                return answer;
+                            };
+
+                            const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                                ? mapAnswerWithLetterMap(originalAnswer)
+                                : originalAnswer;
+
+                            if (q.type === 'multiple') {
+                                const correctList = Array.isArray(correctAnswerForStudent)
+                                    ? correctAnswerForStudent.slice().sort()
+                                    : [correctAnswerForStudent];
+                                const userList = Array.isArray(rawUserAnswer)
+                                    ? rawUserAnswer.slice().sort()
+                                    : [rawUserAnswer];
+                                const hasWrong = userList.some(value => !correctList.includes(value));
+                                if (!hasWrong &&
+                                    userList.length === correctList.length &&
+                                    userList.every((value, index) => value === correctList[index])) {
+                                    isCorrect = true;
+                                }
+                            } else {
+                                if (rawUserAnswer === correctAnswerForStudent) {
+                                    isCorrect = true;
+                                }
+                            }
+                        }
+
+                        const deltaCorrect = isCorrect ? 1 : 0;
+                        await db.updateQuestionStats(id, 1, deltaCorrect);
+                    }
+                }
+            } catch (e) {
+                console.error('更新题目统计失败:', e);
+            }
+
             const result = await db.addRecord(record);
 
             await db.deleteExamSession(userId, paper.id);

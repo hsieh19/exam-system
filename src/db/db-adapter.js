@@ -196,6 +196,8 @@ const sqliteAdapter = {
 
         checkAndAddColumn('questions', 'updatedAt', 'TEXT');
         checkAndAddColumn('questions', 'must', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('questions', 'correctCount', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('questions', 'totalCount', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'published', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'startTime', 'TEXT');
         checkAndAddColumn('papers', 'publishDate', 'TEXT');
@@ -461,6 +463,26 @@ const mysqlAdapter = {
             console.error('MySQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
         }
 
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM questions LIKE 'correctCount'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding correctCount column to questions table');
+                await this.pool.execute("ALTER TABLE questions ADD COLUMN correctCount INT DEFAULT 0");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (questions.correctCount):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.execute("SHOW COLUMNS FROM questions LIKE 'totalCount'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding totalCount column to questions table');
+                await this.pool.execute("ALTER TABLE questions ADD COLUMN totalCount INT DEFAULT 0");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (questions.totalCount):', e.message);
+        }
+
         // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
@@ -700,6 +722,34 @@ const postgresAdapter = {
             }
         } catch (e) {
             console.error('PostgreSQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='questions' AND column_name='correctCount'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding correctCount column to questions table');
+                await this.pool.query('ALTER TABLE questions ADD COLUMN "correctCount" INT DEFAULT 0');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (questions.correctCount):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='questions' AND column_name='totalCount'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding totalCount column to questions table');
+                await this.pool.query('ALTER TABLE questions ADD COLUMN "totalCount" INT DEFAULT 0');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (questions.totalCount):', e.message);
         }
 
         // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
@@ -1071,11 +1121,28 @@ module.exports = {
                 console.error(`解析题目 ${q.id} answer 失败:`, e);
                 answer = q.answer || '';
             }
+
+            const correctCountRaw = q.correctCount;
+            const totalCountRaw = q.totalCount;
+            const correctCount = correctCountRaw == null ? 0 : Number(correctCountRaw);
+            const totalCount = totalCountRaw == null ? 0 : Number(totalCountRaw);
+
+            let accuracy = 0;
+            if (typeof correctCount === 'number' &&
+                typeof totalCount === 'number' &&
+                totalCount > 0 &&
+                correctCount >= 0) {
+                accuracy = (correctCount * 100) / totalCount;
+            }
+
             return {
                 ...q,
                 options,
                 answer,
-                must: q.must == null ? 0 : Number(q.must)
+                must: q.must == null ? 0 : Number(q.must),
+                correctCount,
+                totalCount,
+                accuracy
             };
         });
     },
@@ -1103,6 +1170,16 @@ module.exports = {
         } else {
             await run("DELETE FROM questions WHERE groupId = ?", [groupId]);
         }
+    },
+    updateQuestionStats: async (id, deltaTotal, deltaCorrect) => {
+        if (!id) return;
+        const totalDelta = deltaTotal == null ? 0 : Number(deltaTotal);
+        const correctDelta = deltaCorrect == null ? 0 : Number(deltaCorrect);
+        if (!totalDelta && !correctDelta) return;
+        await run(
+            "UPDATE questions SET totalCount = COALESCE(totalCount, 0) + ?, correctCount = COALESCE(correctCount, 0) + ? WHERE id = ?",
+            [totalDelta, correctDelta, id]
+        );
     },
 
     // ==================== 试卷相关 ====================

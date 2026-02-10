@@ -1004,6 +1004,7 @@ let selectorMajorFilter = 'all';
 let selectorDeviceFilter = 'all';
 let selectorMustFilter = 'all';
 let selectorKeywordFilter = '';
+let selectorAccuracyFilter = 'all';
 
 // 通用下拉菜单控制
 function toggleFilterDropdown(filterType) {
@@ -1217,7 +1218,7 @@ function toggleSelectorFilterDropdown(filterType) {
     if (filterType === 'device' && selectorMajorFilter === 'all') return;
 
     // 关闭所有选题器下拉菜单
-    ['group', 'major', 'device', 'must'].forEach(type => {
+    ['group', 'major', 'device', 'must', 'accuracy'].forEach(type => {
         if (type !== filterType) {
             const menu = document.getElementById(`selector-${type}-filter-menu`);
             if (menu) menu.style.display = 'none';
@@ -1232,6 +1233,7 @@ function toggleSelectorFilterDropdown(filterType) {
         else if (filterType === 'major') initSelectorMajorFilterDropdown();
         else if (filterType === 'device') initSelectorDeviceFilterDropdown();
         else if (filterType === 'must') initSelectorMustFilterDropdown();
+        else if (filterType === 'accuracy') initSelectorAccuracyFilterDropdown();
 
         menu.style.display = 'block';
         setTimeout(() => {
@@ -1347,6 +1349,27 @@ function initSelectorMustFilterDropdown() {
     `).join('');
 }
 
+function initSelectorAccuracyFilterDropdown() {
+    const menu = document.getElementById('selector-accuracy-filter-menu');
+    if (!menu) return;
+
+    const options = [
+        { id: 'all', name: '全部正确率' },
+        { id: 'lt50', name: '低于 50%' },
+        { id: '50_80', name: '50%-80%' },
+        { id: 'gt80', name: '高于 80%' }
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${selectorAccuracyFilter === opt.id ? 'active' : ''}" 
+             data-type="accuracy" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+}
+
 function selectSelectorFilter(filterType, value, name) {
     if (filterType === 'group') selectorGroupFilter = value;
     else if (filterType === 'major') {
@@ -1356,6 +1379,7 @@ function selectSelectorFilter(filterType, value, name) {
     }
     else if (filterType === 'device') selectorDeviceFilter = value;
     else if (filterType === 'must') selectorMustFilter = value;
+    else if (filterType === 'accuracy') selectorAccuracyFilter = value;
 
     document.getElementById(`selector-${filterType}-filter-label`).textContent = name;
     document.getElementById(`selector-${filterType}-filter-menu`).style.display = 'none';
@@ -2270,6 +2294,7 @@ function showQuestionSelector(type, maxCount) {
     selectorDeviceFilter = 'all';
     selectorMustFilter = 'all';
     selectorKeywordFilter = '';
+    selectorAccuracyFilter = 'all';
 
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
     
@@ -2341,6 +2366,22 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
+                <label class="form-label-sm">正确率</label>
+                <div class="dropdown-filter" id="selector-accuracy-filter-dropdown" style="position:relative;">
+                    <button class="btn btn-sm btn-primary" id="btn-selector-accuracy-filter"
+                        data-type="accuracy" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
+                        style="min-width:110px;display:flex;align-items:center;gap:4px;justify-content:center;">
+                        <span id="selector-accuracy-filter-label">全部正确率</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="selector-accuracy-filter-menu"
+                        style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
+                    </div>
+                </div>
+            </div>
+            <div class="filter-item">
                 <label class="form-label-sm">关键词</label>
                 <input type="text" class="form-input-sm" id="selector-filter-keyword" 
                     placeholder="搜索题目内容..." 
@@ -2390,6 +2431,17 @@ function renderQuestionSelectorTable(type, maxCount) {
         questions = questions.filter(q => !q.must);
     }
 
+    if (selectorAccuracyFilter !== 'all') {
+        questions = questions.filter(q => {
+            const value = Number(q.accuracy);
+            if (!Number.isFinite(value)) return false;
+            if (selectorAccuracyFilter === 'lt50') return value < 50;
+            if (selectorAccuracyFilter === '50_80') return value >= 50 && value <= 80;
+            if (selectorAccuracyFilter === 'gt80') return value > 80;
+            return true;
+        });
+    }
+
     if (selectorKeywordFilter) {
         const keyword = selectorKeywordFilter.toLowerCase();
         questions = questions.filter(q => q.content.toLowerCase().includes(keyword));
@@ -2399,6 +2451,17 @@ function renderQuestionSelectorTable(type, maxCount) {
     const getMajorName = (id) => cachedData.categories.find(c => c.id === id)?.name || id || '-';
     const getDeviceName = (id) => cachedData.categories.find(c => c.id === id)?.name || '';
     const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
+    const formatAccuracy = (q) => {
+        const total = q.totalCount == null ? 0 : Number(q.totalCount);
+        const correct = q.correctCount == null ? 0 : Number(q.correctCount);
+        if (!Number.isFinite(total) || total <= 0) return '-';
+        const value = Number.isFinite(Number(q.accuracy))
+            ? Number(q.accuracy)
+            : (Number.isFinite(correct) && correct >= 0 ? (correct * 100) / total : 0);
+        if (!Number.isFinite(value) || value < 0) return '-';
+        const rounded = Math.round(value * 10) / 10;
+        return `${rounded}%`;
+    };
 
     return `<div class="table-container"><table class="data-table">
     <thead><tr>
@@ -2406,6 +2469,7 @@ function renderQuestionSelectorTable(type, maxCount) {
         <th style="width:120px;">专业/设备</th>
         <th style="width:100px;white-space:nowrap;">题库归属</th>
         <th>题目</th>
+        <th style="width:90px;white-space:nowrap;text-align:center;">正确率</th>
         <th style="width:80px;white-space:nowrap;text-align:center;">必考题</th>
         <th style="width:80px;white-space:nowrap;text-align:center;">操作</th>
     </tr></thead>
@@ -2418,12 +2482,13 @@ function renderQuestionSelectorTable(type, maxCount) {
                 <div style="opacity:0.7;">${escapeHtml(getDeviceName(q.deviceType) || '-')}</div>
             </td>
             <td style="white-space:nowrap;"><span class="badge ${q.groupId ? 'badge-warning' : 'badge-success'}">${escapeHtml(getGroupName(q.groupId))}</span></td>
-            <td style="max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(q.content)}">${escapeHtml(q.content)}</td>
+            <td style="max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(q.content)}">${escapeHtml(q.content)}</td>
+            <td style="text-align:center;white-space:nowrap;">${formatAccuracy(q)}</td>
             <td style="text-align:center;white-space:nowrap;">${q.must === 1 ? '<span class="badge badge-success">是</span>' : '<span class="badge badge-secondary">否</span>'}</td>
             <td style="text-align:center;white-space:nowrap;">
                 <button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'viewQuestionDetail', ['id'])">查看</button>
             </td>
-        </tr>`).join('') : '<tr><td colspan="6" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
+        </tr>`).join('') : '<tr><td colspan="7" class="text-center p-4 text-muted">没有找到匹配的题目</td></tr>'}</tbody></table></div>`;
 }
 
 function toggleQuestion(type, questionId, maxCount, checked) {
@@ -3029,14 +3094,39 @@ async function loadAdminRanking(paperId) {
         return;
     }
 
-    container.innerHTML = `<table class="data-table"><thead><tr><th>排名</th><th>答题用户</th><th>得分</th><th>成绩</th><th>用时</th><th style="width:180px;">交卷时间</th><th style="width:120px;">阅卷查看</th></tr></thead>
-    <tbody>${ranking.map(r => {
+    const headerHtml = `
+    <div class="rank-header">
+        <div class="rank-col-rank">排名</div>
+        <div class="rank-col-name">答题用户</div>
+        <div class="rank-col-score">得分</div>
+        <div class="rank-col-result">成绩</div>
+        <div class="rank-col-time">用时</div>
+        <div class="rank-col-datetime">交卷时间</div>
+        <div class="rank-col-action">阅卷查看</div>
+    </div>`;
+
+    const itemsHtml = ranking.map(r => {
         const passed = passScore > 0 ? r.score >= passScore : true;
         const label = passed ? '及格' : '不及格';
         const cls = passed ? 'text-success' : 'text-danger';
-        return `<tr><td>${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `${r.rank}/${totalAssigned}`}</td>
-      <td>${r.username}</td><td><strong>${r.score}</strong></td><td><span class="${cls}">${label}</span></td><td>${formatDuration(r.totalTime, true)}</td><td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td><td><button class="btn btn-sm btn-secondary" data-record-id="${r.id}" onclick="safeOnclick(this, 'showExamRecordDetail', ['recordId'])">查看详情</button></td></tr>`;
-    }).join('')}</tbody></table>`;
+        const rankContent = r.rank <= 3
+            ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>`
+            : `${r.rank}/${totalAssigned}`;
+        return `
+    <div class="rank-item">
+        <div class="rank-col-rank">${rankContent}</div>
+        <div class="rank-col-name">${escapeHtml(r.username || '')}</div>
+        <div class="rank-col-score"><strong>${r.score}</strong></div>
+        <div class="rank-col-result"><span class="${cls}">${label}</span></div>
+        <div class="rank-col-time">${formatDuration(r.totalTime, true)}</div>
+        <div class="rank-col-datetime">${formatFullDateTime(r.submitDate)}</div>
+        <div class="rank-col-action">
+            <button class="btn btn-sm btn-secondary" data-record-id="${r.id}" onclick="safeOnclick(this, 'showExamRecordDetail', ['recordId'])">查看详情</button>
+        </div>
+    </div>`;
+    }).join('');
+
+    container.innerHTML = `<div class="ranking-list">${headerHtml}${itemsHtml}</div>`;
 }
 
 async function showExamRecordDetail(el, recordId) {
@@ -3722,10 +3812,18 @@ async function loadAdminAnalysis(paperId) {
 }
 
 async function showQuestionAccuracy() {
-    const select = document.getElementById('analysis-paper-select');
-    const paperId = select ? select.value : '';
+    const examSelectEl = document.getElementById('examSelect');
+    const analysisSelectEl = document.getElementById('analysis-paper-select');
+    let paperId = '';
+
+    if (examSelectEl && examSelectEl.value) {
+        paperId = examSelectEl.value;
+    } else if (analysisSelectEl && analysisSelectEl.value) {
+        paperId = analysisSelectEl.value;
+    }
+
     if (!paperId) {
-        showAlert('请选择要分析的试卷');
+        showAlert('请先选择试卷');
         return;
     }
     try {

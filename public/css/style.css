@@ -945,6 +945,16 @@ input:checked + .slider:before {
   overflow-x: auto;
 }
 
+.selector-header .filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.selector-header .filter-item {
+  min-width: 140px;
+}
+
 .logs-cards {
   display: none;
 }
@@ -1656,8 +1666,90 @@ input:checked + .slider:before {
 .ranking-header {
   display: flex;
   align-items: center;
-  gap: 24px;
-  margin-bottom: 24px;
+  justify-content: space-between;
+  padding: 10px 15px;
+  background: var(--bg-input);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ranking-list {
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.rank-header,
+.rank-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+}
+
+.rank-header {
+  background: var(--bg-input);
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.rank-item {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.rank-item:last-child {
+  border-bottom: none;
+}
+
+.rank-item:nth-child(odd) {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.rank-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.rank-col-rank,
+.rank-col-name,
+.rank-col-score,
+.rank-col-result,
+.rank-col-time,
+.rank-col-datetime,
+.rank-col-action {
+  flex: 1 1 0;
+}
+
+.rank-col-rank {
+  text-align: left;
+}
+
+.rank-col-name {
+  text-align: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-col-score,
+.rank-col-result {
+  text-align: center;
+}
+
+.rank-col-time,
+.rank-col-datetime {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rank-col-action {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .my-score {
@@ -2526,6 +2618,14 @@ input:checked + .slider:before {
   .table-container {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .selector-header .filter-bar {
+    align-items: flex-start;
+  }
+
+  .selector-header .filter-item {
+    flex: 1 1 calc(50% - 8px);
   }
 
   .data-table {
