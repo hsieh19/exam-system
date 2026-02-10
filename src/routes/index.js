@@ -77,8 +77,20 @@ module.exports = function initRoutes(app, context) {
         keyFn: (req) => `db_import:${getClientIp(req)}`
     });
 
+    const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+    const wrapAsyncHandlers = (handlers) => handlers.map(handler => {
+        if (typeof handler !== 'function') return handler;
+        if (handler.constructor && handler.constructor.name === 'AsyncFunction') return asyncHandler(handler);
+        return handler;
+    });
+    const wrapRouteMethod = (method) => {
+        const original = app[method].bind(app);
+        app[method] = (path, ...handlers) => original(path, ...wrapAsyncHandlers(handlers));
+    };
+    ['get', 'post', 'put', 'delete'].forEach(wrapRouteMethod);
+
     // ==================== 认证中间件 ====================
-    const authMiddleware = async (req, res, next) => {
+    const authMiddleware = asyncHandler(async (req, res, next) => {
         // 白名单
         const whiteList = ['/login', '/feishu/login', '/feishu/config'];
         if (whiteList.includes(req.path)) return next();
@@ -86,43 +98,35 @@ module.exports = function initRoutes(app, context) {
         const token = parseBearerToken(req.headers['authorization']);
         if (!token) return res.status(401).json({ error: '未登录或登录已过期' });
 
-        try {
-            const session = await sessionStore.get(token);
+        const session = await sessionStore.get(token);
 
-            if (!token || !session) {
-                // 如果 Token 还在但 Session 没了 (比如 Redis 丢失或过期)，尝试清理客户端可能的无效 Token
-                if (token) await sessionStore.delete(token); // 确保清理
-                return res.status(401).json({ error: '无效的令牌或会话已过期' });
-            }
-
-            req.user = session.user;
-            req.token = token; // 保存 token 以便续期
-
-            const currentToken = await sessionStore.getUserToken(req.user.id);
-            if (currentToken && currentToken !== token) {
-                await sessionStore.delete(token);
-                return res.status(401).json({ error: '账号已在其他设备登录，您已被强制下线' });
-            }
-
-            // 强制修改密码检查：如果需要修改密码且当前请求不是修改密码接口，则拦截
-            // 默认管理员账号不受此逻辑限制
-            const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
-            if (req.user.isFirstLogin && 
-                req.user.username !== adminUsername && 
-                req.path !== '/change-password' && 
-                req.path !== '/currentUser') {
-                return res.status(403).json({ 
-                    error: '需要修改密码', 
-                    forcePasswordChange: true 
-                });
-            }
-
-            next();
-        } catch (err) {
-            console.error('Auth Error:', err);
-            return res.status(500).json({ error: 'Internal Server Error' });
+        if (!token || !session) {
+            if (token) await sessionStore.delete(token);
+            return res.status(401).json({ error: '无效的令牌或会话已过期' });
         }
-    };
+
+        req.user = session.user;
+        req.token = token;
+
+        const currentToken = await sessionStore.getUserToken(req.user.id);
+        if (currentToken && currentToken !== token) {
+            await sessionStore.delete(token);
+            return res.status(401).json({ error: '账号已在其他设备登录，您已被强制下线' });
+        }
+
+        const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+        if (req.user.isFirstLogin && 
+            req.user.username !== adminUsername && 
+            req.path !== '/change-password' && 
+            req.path !== '/currentUser') {
+            return res.status(403).json({ 
+                error: '需要修改密码', 
+                forcePasswordChange: true 
+            });
+        }
+
+        next();
+    });
 
     // 权限检查中间件
     const roleMiddleware = (allowedRoles) => (req, res, next) => {
@@ -153,30 +157,25 @@ module.exports = function initRoutes(app, context) {
         const tokenFromQuery = typeof req.query.token === 'string' && TOKEN_REGEX.test(req.query.token) ? req.query.token : null;
         const token = tokenFromHeader || tokenFromQuery;
         if (!token) return res.status(401).end();
-        try {
-            const session = await sessionStore.get(token);
-            if (!session) return res.status(401).end();
-            const currentToken = await sessionStore.getUserToken(session.user.id);
-            if (currentToken && currentToken !== token) {
-                await sessionStore.delete(token);
-                return res.status(401).end();
-            }
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Accel-Buffering', 'no');
-            if (res.flushHeaders) res.flushHeaders();
-            res.write('retry: 5000\n\n');
-            res.__userId = session.user.id;
-            res.__token = token;
-            sseClients.add(res);
-            req.on('close', () => {
-                sseClients.delete(res);
-            });
-        } catch (e) {
-            console.error('SSE Error:', e);
-            res.status(500).end();
+        const session = await sessionStore.get(token);
+        if (!session) return res.status(401).end();
+        const currentToken = await sessionStore.getUserToken(session.user.id);
+        if (currentToken && currentToken !== token) {
+            await sessionStore.delete(token);
+            return res.status(401).end();
         }
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        if (res.flushHeaders) res.flushHeaders();
+        res.write('retry: 5000\n\n');
+        res.__userId = session.user.id;
+        res.__token = token;
+        sseClients.add(res);
+        req.on('close', () => {
+            sseClients.delete(res);
+        });
     });
 
     // 对 /api 下的所有请求应用鉴权
@@ -215,17 +214,10 @@ module.exports = function initRoutes(app, context) {
             });
         }
 
-        try {
-            await db.switchDatabase(dbType);
-            // 清除所有会话，强制重新登录
-            await sessionStore.clear();
-            // 记录日志
-            await logAction('切换数据库', 'database', dbType, req.user, { dbType }, getClientIp(req));
-            res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
-        } catch (e) {
-            console.error('切换数据库失败:', e);
-            res.status(500).json({ error: '切换数据库失败，请检查配置' });
-        }
+        await db.switchDatabase(dbType);
+        await sessionStore.clear();
+        await logAction('切换数据库', 'database', dbType, req.user, { dbType }, getClientIp(req));
+        res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
     });
 
     app.get('/api/db/export', adminMiddleware, (req, res) => {
@@ -255,9 +247,6 @@ module.exports = function initRoutes(app, context) {
             await sessionStore.clear();
             res.json({ success: true, message: '数据库导入成功，请重新登录' });
             broadcast('db_change', { resource: 'all' });
-        } catch (e) {
-            console.error('数据库导入失败:', e);
-            res.status(500).json({ error: '数据库导入失败，请检查文件' });
         } finally {
             try {
                 fs.unlinkSync(req.file.path);
@@ -385,50 +374,38 @@ module.exports = function initRoutes(app, context) {
             });
         }
 
-        try {
-            const user = await db.getUserByUsername(req.user.username);
-            // 验证旧密码
-            const isValid = await db.verifyPassword(oldPassword, user.password);
-            if (!isValid) {
-                return res.status(400).json({ error: '原密码错误' });
-            }
-
-            await db.changePassword(userId, newPassword);
-            
-            // 更新当前 session 中的用户信息
-            const session = await sessionStore.get(req.token);
-            if (session && session.user) {
-                session.user.isFirstLogin = 0;
-                await sessionStore.set(req.token, session.user, SESSION_EXPIRY_MS);
-                await sessionStore.setUserToken(userId, req.token, SESSION_EXPIRY_MS);
-            }
-
-            await logAction('修改密码', 'user', userId, req.user, {}, getClientIp(req));
-            res.json({ success: true, message: '密码修改成功' });
-        } catch (e) {
-            console.error('修改密码失败:', e);
-            res.status(500).json({ error: '修改密码失败' });
+        const user = await db.getUserByUsername(req.user.username);
+        const isValid = await db.verifyPassword(oldPassword, user.password);
+        if (!isValid) {
+            return res.status(400).json({ error: '原密码错误' });
         }
+
+        await db.changePassword(userId, newPassword);
+        
+        const session = await sessionStore.get(req.token);
+        if (session && session.user) {
+            session.user.isFirstLogin = 0;
+            await sessionStore.set(req.token, session.user, SESSION_EXPIRY_MS);
+            await sessionStore.setUserToken(userId, req.token, SESSION_EXPIRY_MS);
+        }
+
+        await logAction('修改密码', 'user', userId, req.user, {}, getClientIp(req));
+        res.json({ success: true, message: '密码修改成功' });
     });
 
     app.post('/api/logout', async (req, res) => {
         const token = req.token;
         const userId = req.user?.id;
-        try {
-            if (token) await sessionStore.delete(token);
-            if (userId) {
-                const currentToken = await sessionStore.getUserToken(userId);
-                if (currentToken && currentToken === token) {
-                    await sessionStore.deleteUserToken(userId);
-                }
-                closeSseForUser(userId);
-                await logAction('退出登录', 'user', userId, req.user, {}, getClientIp(req));
+        if (token) await sessionStore.delete(token);
+        if (userId) {
+            const currentToken = await sessionStore.getUserToken(userId);
+            if (currentToken && currentToken === token) {
+                await sessionStore.deleteUserToken(userId);
             }
-            res.json({ success: true });
-        } catch (e) {
-            console.error('Logout error:', e);
-            res.status(500).json({ error: '退出登录失败' });
+            closeSseForUser(userId);
+            await logAction('退出登录', 'user', userId, req.user, {}, getClientIp(req));
         }
+        res.json({ success: true });
     });
 
     // ==================== 飞书集成接口 ====================
@@ -448,13 +425,10 @@ module.exports = function initRoutes(app, context) {
             return res.status(400).json({ error: 'Missing code' });
         }
 
-        try {
-            // 1. 获取 app_access_token
-            const appAccessToken = await feishuService.getAppAccessToken();
-            
-            // 2. 获取用户信息
-            const feishuUser = await feishuService.getUserInfo(code, appAccessToken);
-            const { open_id, user_id, name } = feishuUser;
+        const appAccessToken = await feishuService.getAppAccessToken();
+        
+        const feishuUser = await feishuService.getUserInfo(code, appAccessToken);
+        const { open_id, user_id, name } = feishuUser;
 
             // --- 部门同步逻辑开始 ---
             let groupIds = [];
@@ -546,12 +520,7 @@ module.exports = function initRoutes(app, context) {
             
             await logAction('飞书登录成功', 'user', user.id, user, { username: user.username }, clientIp);
             
-            res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
-        } catch (err) {
-            console.error('Feishu Login Error:', err);
-            await logAction('飞书登录失败', 'user', null, null, { error: err.message }, clientIp);
-            res.status(500).json({ error: '飞书认证失败' });
-        }
+        res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
     });
 
     app.post('/api/login', loginLimiter, async (req, res) => {
@@ -589,19 +558,12 @@ module.exports = function initRoutes(app, context) {
     app.get('/api/currentUser', async (req, res) => {
         // 中间件已注入 req.user
         if (req.user) {
-            try {
-                const latest = await db.getUserById(req.user.id);
-                if (latest) {
-                    // 如果用户需要强制改密，且当前请求不是允许的白名单，则在 authMiddleware 已经拦截了
-                    // 这里返回用户信息
-                    res.json({ user: latest });
-                } else {
-                    console.error(`User not found in DB for ID: ${req.user.id}, Username: ${req.user.username}`);
-                    res.status(401).json({ error: 'User not found' });
-                }
-            } catch (err) {
-                console.error(`Error getting user ${req.user.id}:`, err);
-                res.status(500).json({ error: 'Internal Server Error' });
+            const latest = await db.getUserById(req.user.id);
+            if (latest) {
+                res.json({ user: latest });
+            } else {
+                console.error(`User not found in DB for ID: ${req.user.id}, Username: ${req.user.username}`);
+                res.status(401).json({ error: 'User not found' });
             }
         } else {
             res.status(401).json({ error: 'Unauthorized' });
@@ -751,32 +713,25 @@ module.exports = function initRoutes(app, context) {
     // ==================== 试卷接口 ====================
     // 获取排行榜可选试卷列表
     app.get('/api/papers/ranking-list', async (req, res) => {
-        try {
-            const user = req.user;
-            const papers = await db.getPapers();
+        const user = req.user;
+        const papers = await db.getPapers();
 
-            if (user.role === 'super_admin') {
-                return res.json(papers);
-            }
-
-            // 对于分组管理员，返回本组创建的试卷
-            if (user.role === 'group_admin') {
-                return res.json(papers.filter(p => p.groupId === user.groupId));
-            }
-
-            // 对于学生，返回已发布的、且目标包含该学生或其分组的试卷
-            const visiblePapers = papers.filter(p => {
-                if (!p.published) return false;
-                const inGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
-                const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
-                return inGroup || inUsers;
-            });
-
-            res.json(visiblePapers);
-        } catch (error) {
-            console.error('Error fetching ranking papers:', error);
-            res.status(500).json({ error: '获取试卷列表失败' });
+        if (user.role === 'super_admin') {
+            return res.json(papers);
         }
+
+        if (user.role === 'group_admin') {
+            return res.json(papers.filter(p => p.groupId === user.groupId));
+        }
+
+        const visiblePapers = papers.filter(p => {
+            if (!p.published) return false;
+            const inGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+            const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
+            return inGroup || inUsers;
+        });
+
+        res.json(visiblePapers);
     });
 
     app.get('/api/papers', adminMiddleware, async (req, res) => {
@@ -889,6 +844,14 @@ module.exports = function initRoutes(app, context) {
             startTime,
             deadline
         });
+        await db.savePushTask({
+            paperId: req.params.id,
+            targetGroups,
+            targetUsers,
+            startTime,
+            deadline,
+            pushTime
+        });
 
         // 记录系统日志
         await logAction('发布试卷', 'paper', req.params.id, req.user, { name: existing.name, targetGroups }, getClientIp(req));
@@ -937,296 +900,342 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权访问' });
         }
 
+        const assignments = await db.getUserAssignedPapers(user.id);
         const papers = await db.getPapers();
-        const availablePromises = papers.map(async p => {
-            if (!p.published) return null;
 
-            const isInGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
-            const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
-            if (!isInGroup && !isTargetUser) return null;
+        let results;
+        if (!assignments || assignments.length === 0) {
+            const availablePromises = papers.map(async p => {
+                if (!p.published) return null;
 
-            const record = await db.getRecordByUserAndPaper(user.id, p.id);
-            if (record) {
-                if (p.publishDate && record.submitDate) {
-                    const submitDate = new Date(record.submitDate);
-                    const publishDate = new Date(p.publishDate);
-                    if (submitDate >= publishDate) return null;
+                const isInGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+                const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
+                if (!isInGroup && !isTargetUser) return null;
+
+                const record = await db.getRecordByUserAndPaper(user.id, p.id);
+                if (record) {
+                    if (p.publishDate && record.submitDate) {
+                        const submitDate = new Date(record.submitDate);
+                        const publishDate = new Date(p.publishDate);
+                        if (submitDate >= publishDate) return null;
+                    } else {
+                        return null;
+                    }
+                }
+
+                const session = await db.getExamSession(user.id, p.id);
+                let pusherName = '未知用户';
+                if (p.creatorId) {
+                    const creator = await db.getUserById(p.creatorId);
+                    if (creator && creator.username) {
+                        pusherName = creator.username;
+                    }
+                }
+                return { ...p, isOngoing: !!session, pusherName };
+            });
+
+            const list = await Promise.all(availablePromises);
+            results = list.filter(p => p !== null);
+        } else {
+            const assignmentMap = new Map();
+            assignments.forEach(a => {
+                if (!assignmentMap.has(a.paperId)) {
+                    assignmentMap.set(a.paperId, a);
                 } else {
-                    return null;
+                    const existingAssign = assignmentMap.get(a.paperId);
+                    if (existingAssign.assignedAt && a.assignedAt && new Date(a.assignedAt) > new Date(existingAssign.assignedAt)) {
+                        assignmentMap.set(a.paperId, a);
+                    }
                 }
-            }
+            });
 
-            const session = await db.getExamSession(user.id, p.id);
-            let pusherName = '未知用户';
-            if (p.creatorId) {
-                const creator = await db.getUserById(p.creatorId);
-                if (creator && creator.username) {
-                    pusherName = creator.username;
+            const availablePromises = papers.map(async p => {
+                if (!p.published) return null;
+                const assignment = assignmentMap.get(p.id);
+                if (!assignment) return null;
+
+                const record = await db.getRecordByUserAndPaper(user.id, p.id);
+                if (record) {
+                    if (assignment.assignedAt && record.submitDate) {
+                        const submitDate = new Date(record.submitDate);
+                        const assignedAt = new Date(assignment.assignedAt);
+                        if (submitDate >= assignedAt) return null;
+                    } else {
+                        return null;
+                    }
                 }
-            }
-            return { ...p, isOngoing: !!session, pusherName };
-        });
 
-        const results = await Promise.all(availablePromises);
-        res.json(results.filter(p => p !== null));
+                const session = await db.getExamSession(user.id, p.id);
+                let pusherName = '未知用户';
+                if (p.creatorId) {
+                    const creator = await db.getUserById(p.creatorId);
+                    if (creator && creator.username) {
+                        pusherName = creator.username;
+                    }
+                }
+                return {
+                    ...p,
+                    startTime: assignment.startTime || p.startTime || null,
+                    deadline: assignment.deadline || p.deadline || null,
+                    isOngoing: !!session,
+                    pusherName
+                };
+            });
+
+            const list = await Promise.all(availablePromises);
+            results = list.filter(p => p !== null);
+        }
+
+        res.json(results);
     });
 
     // ==================== 记录接口 ====================
-    app.get('/api/records', adminMiddleware, async (req, res) => {
-        res.json(await db.getRecords());
-    });
-
     app.get('/api/records/paper/:paperId', adminMiddleware, async (req, res) => {
         res.json(await db.getRecordsByPaper(req.params.paperId));
     });
 
     app.get('/api/exam-record/:id', adminMiddleware, async (req, res) => {
-        try {
-            const recordId = req.params.id;
-            const records = await db.getRecords();
-            const record = records.find(r => r.id === recordId);
-            if (!record) {
-                return res.status(404).json({ error: '考试记录不存在' });
+        const recordId = req.params.id;
+        const records = await db.getRecords();
+        const record = records.find(r => r.id === recordId);
+        if (!record) {
+            return res.status(404).json({ error: '考试记录不存在' });
+        }
+
+        const user = await db.getUserById(record.userId);
+        const paper = await db.getPaperById(record.paperId);
+        if (!paper) {
+            return res.status(404).json({ error: '试卷不存在' });
+        }
+
+        const allQuestions = await db.getQuestions();
+        const questionMap = new Map();
+        allQuestions.forEach(q => {
+            questionMap.set(q.id, q);
+        });
+
+        const letterChars = 'ABCDEFGH';
+        const hashString = (str) => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const chr = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + chr;
+                hash |= 0;
             }
+            return hash;
+        };
 
-            const user = await db.getUserById(record.userId);
-            const paper = await db.getPaperById(record.paperId);
-            if (!paper) {
-                return res.status(404).json({ error: '试卷不存在' });
-            }
-
-            const allQuestions = await db.getQuestions();
-            const questionMap = new Map();
-            allQuestions.forEach(q => {
-                questionMap.set(q.id, q);
-            });
-
-            const letterChars = 'ABCDEFGH';
-            const hashString = (str) => {
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const chr = str.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + chr;
-                    hash |= 0;
-                }
-                return hash;
-            };
-
-            const buildRulesMap = (rules) => {
-                if (Array.isArray(rules) && rules.length > 0) {
-                    const map = {};
-                    rules.forEach(rule => {
-                        if (!rule || !rule.type) {
-                            return;
-                        }
-                        map[rule.type] = {
-                            score: rule.score == null ? 0 : Number(rule.score),
-                            partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
-                            timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
-                        };
-                    });
-                    return map;
-                }
-                return {
-                    single: { score: 2, partialScore: 0, timeLimit: 15 },
-                    multiple: { score: 4, partialScore: 2, timeLimit: 30 },
-                    judge: { score: 2, partialScore: 0, timeLimit: 20 }
-                };
-            };
-
-            const rulesMap = buildRulesMap(paper.rules || []);
-
-            const normalizeAnswerValue = (answer) => {
-                if (!answer) {
-                    return answer;
-                }
-                if (Array.isArray(answer)) {
-                    return answer.slice();
-                }
-                if (typeof answer === 'string') {
-                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                    if (parts.length > 1) {
-                        return parts;
-                    }
-                    return answer;
-                }
-                return answer;
-            };
-
-            const recordAnswers = record.answers || {};
-            const detailedQuestions = [];
-
-            const questionTypes = ['single', 'multiple', 'judge'];
-            questionTypes.forEach(type => {
-                const ids = (paper.questions && paper.questions[type]) || [];
-                ids.forEach(id => {
-                    const q = questionMap.get(id);
-                    if (!q) {
+        const buildRulesMap = (rules) => {
+            if (Array.isArray(rules) && rules.length > 0) {
+                const map = {};
+                rules.forEach(rule => {
+                    if (!rule || !rule.type) {
                         return;
                     }
+                    map[rule.type] = {
+                        score: rule.score == null ? 0 : Number(rule.score),
+                        partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
+                        timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
+                    };
+                });
+                return map;
+            }
+            return {
+                single: { score: 2, partialScore: 0, timeLimit: 15 },
+                multiple: { score: 4, partialScore: 2, timeLimit: 30 },
+                judge: { score: 2, partialScore: 0, timeLimit: 20 }
+            };
+        };
 
-                    const baseOptions = q.type === 'judge'
-                        ? ['正确', '错误']
-                        : Array.isArray(q.options) ? q.options : [];
+        const rulesMap = buildRulesMap(paper.rules || []);
 
-                    const optionItems = [];
-                    const letterMap = {};
+        const normalizeAnswerValue = (answer) => {
+            if (!answer) {
+                return answer;
+            }
+            if (Array.isArray(answer)) {
+                return answer.slice();
+            }
+            if (typeof answer === 'string') {
+                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                if (parts.length > 1) {
+                    return parts;
+                }
+                return answer;
+            }
+            return answer;
+        };
 
-                    if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                        const indices = baseOptions.map((_, index) => index);
-                        indices.sort((a, b) => {
-                            const ha = hashString(String(record.userId) + q.id + String(a));
-                            const hb = hashString(String(record.userId) + q.id + String(b));
-                            if (ha === hb) {
-                                return a - b;
-                            }
-                            return ha - hb;
+        const recordAnswers = record.answers || {};
+        const detailedQuestions = [];
+
+        const questionTypes = ['single', 'multiple', 'judge'];
+        questionTypes.forEach(type => {
+            const ids = (paper.questions && paper.questions[type]) || [];
+            ids.forEach(id => {
+                const q = questionMap.get(id);
+                if (!q) {
+                    return;
+                }
+
+                const baseOptions = q.type === 'judge'
+                    ? ['正确', '错误']
+                    : Array.isArray(q.options) ? q.options : [];
+
+                const optionItems = [];
+                const letterMap = {};
+
+                if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                    const indices = baseOptions.map((_, index) => index);
+                    indices.sort((a, b) => {
+                        const ha = hashString(String(record.userId) + q.id + String(a));
+                        const hb = hashString(String(record.userId) + q.id + String(b));
+                        if (ha === hb) {
+                            return a - b;
+                        }
+                        return ha - hb;
+                    });
+                    indices.forEach((origIndex, position) => {
+                        const label = letterChars[position] || '';
+                        const text = baseOptions[origIndex];
+                        optionItems.push({
+                            label,
+                            text
                         });
-                        indices.forEach((origIndex, position) => {
-                            const label = letterChars[position] || '';
-                            const text = baseOptions[origIndex];
+                        const originalLabel = letterChars[origIndex] || '';
+                        if (originalLabel) {
+                            letterMap[originalLabel] = label;
+                        }
+                    });
+                } else {
+                    if (q.type === 'judge') {
+                        optionItems.push(
+                            { label: 'A', text: '正确' },
+                            { label: 'B', text: '错误' }
+                        );
+                    } else {
+                        baseOptions.forEach((text, index) => {
+                            const label = letterChars[index] || '';
                             optionItems.push({
                                 label,
                                 text
                             });
-                            const originalLabel = letterChars[origIndex] || '';
-                            if (originalLabel) {
-                                letterMap[originalLabel] = label;
-                            }
                         });
-                    } else {
-                        if (q.type === 'judge') {
-                            optionItems.push(
-                                { label: 'A', text: '正确' },
-                                { label: 'B', text: '错误' }
-                            );
-                        } else {
-                            baseOptions.forEach((text, index) => {
-                                const label = letterChars[index] || '';
-                                optionItems.push({
-                                    label,
-                                    text
-                                });
-                            });
-                        }
                     }
+                }
 
-                    const originalAnswer = normalizeAnswerValue(q.answer);
+                const originalAnswer = normalizeAnswerValue(q.answer);
 
-                    const mapAnswerWithLetterMap = (answer) => {
-                        if (!answer) {
-                            return answer;
-                        }
-                        if (Array.isArray(answer)) {
-                            return answer.map(value => {
+                const mapAnswerWithLetterMap = (answer) => {
+                    if (!answer) {
+                        return answer;
+                    }
+                    if (Array.isArray(answer)) {
+                        return answer.map(value => {
+                            const mapped = letterMap[value];
+                            return mapped || value;
+                        });
+                    }
+                    if (typeof answer === 'string') {
+                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                        if (parts.length > 1) {
+                            return parts.map(value => {
                                 const mapped = letterMap[value];
                                 return mapped || value;
                             });
                         }
-                        if (typeof answer === 'string') {
-                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                            if (parts.length > 1) {
-                                return parts.map(value => {
-                                    const mapped = letterMap[value];
-                                    return mapped || value;
-                                });
-                            }
-                            const mapped = letterMap[answer];
-                            return mapped || answer;
-                        }
-                        return answer;
-                    };
+                        const mapped = letterMap[answer];
+                        return mapped || answer;
+                    }
+                    return answer;
+                };
 
-                    const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                        ? mapAnswerWithLetterMap(originalAnswer)
-                        : originalAnswer;
+                const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                    ? mapAnswerWithLetterMap(originalAnswer)
+                    : originalAnswer;
 
-                    const rawUserAnswer = recordAnswers[id];
-                    const ruleConfig = rulesMap[q.type] || {
-                        score: q.type === 'multiple' ? 4 : 2,
-                        partialScore: q.type === 'multiple' ? 2 : 0,
-                        timeLimit: null
-                    };
+                const rawUserAnswer = recordAnswers[id];
+                const ruleConfig = rulesMap[q.type] || {
+                    score: q.type === 'multiple' ? 4 : 2,
+                    partialScore: q.type === 'multiple' ? 2 : 0,
+                    timeLimit: null
+                };
 
-                    let questionScore = 0;
-                    let isCorrect = false;
+                let questionScore = 0;
+                let isCorrect = false;
 
-                    const isEmptyAnswer = rawUserAnswer == null ||
-                        (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
-                        (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+                const isEmptyAnswer = rawUserAnswer == null ||
+                    (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                    (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
 
-                    if (!isEmptyAnswer) {
-                        if (q.type === 'multiple') {
-                            const correctList = Array.isArray(correctAnswerForStudent)
-                                ? correctAnswerForStudent.slice().sort()
-                                : [correctAnswerForStudent];
-                            const userList = Array.isArray(rawUserAnswer)
-                                ? rawUserAnswer.slice().sort()
-                                : [rawUserAnswer];
+                if (!isEmptyAnswer) {
+                    if (q.type === 'multiple') {
+                        const correctList = Array.isArray(correctAnswerForStudent)
+                            ? correctAnswerForStudent.slice().sort()
+                            : [correctAnswerForStudent];
+                        const userList = Array.isArray(rawUserAnswer)
+                            ? rawUserAnswer.slice().sort()
+                            : [rawUserAnswer];
 
-                            const hasWrong = userList.some(value => !correctList.includes(value));
-                            if (!hasWrong) {
-                                if (userList.length === correctList.length &&
-                                    userList.every((value, index) => value === correctList[index])) {
-                                    questionScore = ruleConfig.score;
-                                    isCorrect = true;
-                                } else if (userList.length < correctList.length &&
-                                    userList.every(value => correctList.includes(value))) {
-                                    questionScore = ruleConfig.partialScore || 0;
-                                }
-                            }
-                        } else {
-                            if (rawUserAnswer === correctAnswerForStudent) {
+                        const hasWrong = userList.some(value => !correctList.includes(value));
+                        if (!hasWrong) {
+                            if (userList.length === correctList.length &&
+                                userList.every((value, index) => value === correctList[index])) {
                                 questionScore = ruleConfig.score;
                                 isCorrect = true;
+                            } else if (userList.length < correctList.length &&
+                                userList.every(value => correctList.includes(value))) {
+                                questionScore = ruleConfig.partialScore || 0;
                             }
                         }
+                    } else {
+                        if (rawUserAnswer === correctAnswerForStudent) {
+                            questionScore = ruleConfig.score;
+                            isCorrect = true;
+                        }
                     }
+                }
 
-                    detailedQuestions.push({
-                        id: q.id,
-                        type: q.type,
-                        content: q.content,
-                        options: optionItems,
-                        studentAnswer: rawUserAnswer,
-                        correctAnswer: correctAnswerForStudent,
-                        score: questionScore,
-                        maxScore: ruleConfig.score,
-                        isCorrect
-                    });
+                detailedQuestions.push({
+                    id: q.id,
+                    type: q.type,
+                    content: q.content,
+                    options: optionItems,
+                    studentAnswer: rawUserAnswer,
+                    correctAnswer: correctAnswerForStudent,
+                    score: questionScore,
+                    maxScore: ruleConfig.score,
+                    isCorrect
                 });
             });
+        });
 
-            const passScore = paper.passScore == null ? 0 : Number(paper.passScore);
-            const passed = passScore > 0 ? record.score >= passScore : true;
+        const passScore = paper.passScore == null ? 0 : Number(paper.passScore);
+        const passed = passScore > 0 ? record.score >= passScore : true;
 
-            const response = {
-                id: record.id,
-                paper: {
-                    id: paper.id,
-                    name: paper.name,
-                    passScore
-                },
-                user: {
-                    id: record.userId,
-                    username: user && user.username ? user.username : '未知用户'
-                },
-                summary: {
-                    score: record.score,
-                    totalTime: record.totalTime,
-                    submitDate: record.submitDate,
-                    totalQuestions: detailedQuestions.length,
-                    passScore,
-                    passed
-                },
-                questions: detailedQuestions
-            };
+        const response = {
+            id: record.id,
+            paper: {
+                id: paper.id,
+                name: paper.name,
+                passScore
+            },
+            user: {
+                id: record.userId,
+                username: user && user.username ? user.username : '未知用户'
+            },
+            summary: {
+                score: record.score,
+                totalTime: record.totalTime,
+                submitDate: record.submitDate,
+                totalQuestions: detailedQuestions.length,
+                passScore,
+                passed
+            },
+            questions: detailedQuestions
+        };
 
-            res.json(response);
-        } catch (e) {
-            console.error('获取考试记录详情失败:', e);
-            res.status(500).json({ error: '获取考试记录详情失败' });
-        }
+        res.json(response);
     });
 
     app.delete('/api/records/paper/:paperId', adminMiddleware, async (req, res) => {
@@ -1235,17 +1244,43 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.post('/api/records', async (req, res) => {
-        try {
-            const { paperId } = req.body || {};
-            if (!paperId) return res.status(400).json({ error: '缺少试卷ID' });
+        const { paperId } = req.body || {};
+        if (!paperId) return res.status(400).json({ error: '缺少试卷ID' });
 
-            const userId = req.user.id;
-            const user = await db.getUserById(userId);
-            if (!user) return res.status(401).json({ error: '用户不存在' });
+        const userId = req.user.id;
+        const user = await db.getUserById(userId);
+        if (!user) return res.status(401).json({ error: '用户不存在' });
 
-            const paper = await db.getPaperById(paperId);
-            if (!paper || !paper.published) return res.status(404).json({ error: '试卷不存在或未发布' });
+        const paper = await db.getPaperById(paperId);
+        if (!paper || !paper.published) return res.status(404).json({ error: '试卷不存在或未发布' });
 
+        const assignment = await db.getUserExamAssignment(user.id, paper.id);
+
+        if (assignment) {
+            const now = new Date();
+            const startValue = assignment.startTime || paper.startTime || null;
+            const deadlineValue = assignment.deadline || paper.deadline || null;
+
+            if (startValue) {
+                const startTime = new Date(String(startValue).replace(' ', 'T'));
+                if (now < startTime) return res.status(400).json({ error: '考试未开始' });
+            }
+            if (deadlineValue) {
+                const deadline = new Date(String(deadlineValue).replace(' ', 'T'));
+                if (deadline < now) return res.status(400).json({ error: '考试已截止' });
+            }
+
+            const existing = await db.getRecordByUserAndPaper(user.id, paper.id);
+            if (existing) {
+                if (assignment.assignedAt && existing.submitDate) {
+                    const submitDate = new Date(existing.submitDate);
+                    const assignedAt = new Date(assignment.assignedAt);
+                    if (submitDate >= assignedAt) return res.status(400).json({ error: '您已提交过该考试' });
+                } else {
+                    return res.status(400).json({ error: '您已提交过该考试' });
+                }
+            }
+        } else {
             const inGroup = paper.targetGroups && paper.targetGroups.length > 0
                 ? paper.targetGroups.includes(user.groupId)
                 : false;
@@ -1275,32 +1310,33 @@ module.exports = function initRoutes(app, context) {
                     return res.status(400).json({ error: '您已提交过该考试' });
                 }
             }
+        }
 
-            const session = await db.getExamSession(user.id, paper.id);
-            if (!session) return res.status(400).json({ error: '考试会话不存在或已结束，请重新进入考试后提交' });
+        const session = await db.getExamSession(user.id, paper.id);
+        if (!session) return res.status(400).json({ error: '考试会话不存在或已结束，请重新进入考试后提交' });
 
-            const record = { ...(req.body || {}), id: generateId('r_'), userId };
+        const record = { ...(req.body || {}), id: generateId('r_'), userId };
 
-            try {
-                const paperQuestionIds = [];
-                const questionTypes = ['single', 'multiple', 'judge'];
-                questionTypes.forEach(type => {
-                    const ids = paper.questions && paper.questions[type];
-                    if (Array.isArray(ids)) {
-                        paperQuestionIds.push(...ids);
-                    } else if (ids) {
-                        paperQuestionIds.push(ids);
+        try {
+            const paperQuestionIds = [];
+            const questionTypes = ['single', 'multiple', 'judge'];
+            questionTypes.forEach(type => {
+                const ids = paper.questions && paper.questions[type];
+                if (Array.isArray(ids)) {
+                    paperQuestionIds.push(...ids);
+                } else if (ids) {
+                    paperQuestionIds.push(ids);
+                }
+            });
+
+            if (paperQuestionIds.length > 0 && record.answers) {
+                const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
+                const questionMap = new Map();
+                allQuestions.forEach(q => {
+                    if (q && q.id) {
+                        questionMap.set(q.id, q);
                     }
                 });
-
-                if (paperQuestionIds.length > 0 && record.answers) {
-                    const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
-                    const questionMap = new Map();
-                    allQuestions.forEach(q => {
-                        if (q && q.id) {
-                            questionMap.set(q.id, q);
-                        }
-                    });
 
                     const letterChars = 'ABCDEFGH';
                     const hashString = (str) => {
@@ -1331,11 +1367,11 @@ module.exports = function initRoutes(app, context) {
                     };
 
                     const recordAnswers = record.answers || {};
-                    for (const id of paperQuestionIds) {
-                        const q = questionMap.get(id);
-                        if (!q) {
-                            continue;
-                        }
+                for (const id of paperQuestionIds) {
+                    const q = questionMap.get(id);
+                    if (!q) {
+                        continue;
+                    }
 
                         const rawUserAnswer = recordAnswers[id];
                         const isEmptyAnswer = rawUserAnswer == null ||
@@ -1420,22 +1456,18 @@ module.exports = function initRoutes(app, context) {
                             }
                         }
 
-                        const deltaCorrect = isCorrect ? 1 : 0;
-                        await db.updateQuestionStats(id, 1, deltaCorrect);
-                    }
+                    const deltaCorrect = isCorrect ? 1 : 0;
+                    await db.updateQuestionStats(id, 1, deltaCorrect);
                 }
-            } catch (e) {
-                console.error('更新题目统计失败:', e);
             }
-
-            const result = await db.addRecord(record);
-
-            await db.deleteExamSession(userId, paper.id);
-            res.json(result);
         } catch (e) {
-            console.error('提交考试记录失败:', e);
-            res.status(500).json({ error: '提交考试记录失败' });
+            console.error('更新题目统计失败:', e);
         }
+
+        const result = await db.addRecord(record);
+
+        await db.deleteExamSession(userId, paper.id);
+        res.json(result);
     });
 
     app.get('/api/ranking/:paperId', async (req, res) => {
@@ -1461,14 +1493,33 @@ module.exports = function initRoutes(app, context) {
         const records = await db.getRecordsByPaper(paperId);
         const users = await db.getUsers();
 
-        // 计算该试卷总共推送给了多少人
-        let totalAssigned = 0;
-        if (paper && paper.targetGroups && paper.targetGroups.length > 0) {
-            totalAssigned = users.filter(u => u.role === 'student' && paper.targetGroups.includes(u.groupId)).length;
-        } else if (paper && paper.published) {
-            // 如果已发布但没有目标组（可能逻辑上不应该，但作为保底），或者是全员推送
-            totalAssigned = users.filter(u => u.role === 'student').length;
+        const studentUsers = users.filter(u => u.role === 'student');
+        const targetGroupIds = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
+        const targetUserIds = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
+
+        const assignedUserIdSet = new Set();
+
+        if (targetGroupIds.length > 0 || targetUserIds.length > 0) {
+            if (targetGroupIds.length > 0) {
+                studentUsers.forEach(u => {
+                    if (u.groupId && targetGroupIds.includes(u.groupId)) {
+                        assignedUserIdSet.add(u.id);
+                    }
+                });
+            }
+
+            if (targetUserIds.length > 0) {
+                targetUserIds.forEach(id => {
+                    if (studentUsers.find(u => u.id === id)) {
+                        assignedUserIdSet.add(id);
+                    }
+                });
+            }
+        } else if (paper.published) {
+            studentUsers.forEach(u => assignedUserIdSet.add(u.id));
         }
+
+        const totalAssigned = assignedUserIdSet.size;
 
         const ranking = records.map(r => {
             const user = users.find(u => u.id === r.userId);
@@ -1489,32 +1540,31 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.get('/api/analysis/questions/:paperId', adminMiddleware, async (req, res) => {
-        try {
-            const paperId = req.params.paperId;
-            const paper = await db.getPaperById(paperId);
-            if (!paper) {
-                return res.status(404).json({ error: '试卷不存在' });
-            }
-            if (req.user.role !== 'super_admin') {
-                const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
-                const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
-                const inGroup = req.user.groupId ? targetGroups.includes(req.user.groupId) : false;
-                const inUsers = targetUsers.includes(req.user.id);
-                if (req.user.role === 'group_admin') {
-                    const canSee = paper.creatorId === req.user.id || inGroup || inUsers;
-                    if (!canSee) {
-                        return res.status(403).json({ error: '无权分析该试卷' });
-                    }
-                } else {
-                    if (!inGroup && !inUsers) {
-                        return res.status(403).json({ error: '无权分析该试卷' });
-                    }
+        const paperId = req.params.paperId;
+        const paper = await db.getPaperById(paperId);
+        if (!paper) {
+            return res.status(404).json({ error: '试卷不存在' });
+        }
+        if (req.user.role !== 'super_admin') {
+            const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
+            const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
+            const inGroup = req.user.groupId ? targetGroups.includes(req.user.groupId) : false;
+            const inUsers = targetUsers.includes(req.user.id);
+            if (req.user.role === 'group_admin') {
+                const canSee = paper.creatorId === req.user.id || inGroup || inUsers;
+                if (!canSee) {
+                    return res.status(403).json({ error: '无权分析该试卷' });
+                }
+            } else {
+                if (!inGroup && !inUsers) {
+                    return res.status(403).json({ error: '无权分析该试卷' });
                 }
             }
-            const records = await db.getRecordsByPaper(paperId);
-            if (!records || records.length === 0) {
-                return res.json({ paperId, questions: [] });
-            }
+        }
+        const records = await db.getRecordsByPaper(paperId);
+        if (!records || records.length === 0) {
+            return res.json({ paperId, questions: [] });
+        }
 
             // 获取试卷中的所有题目 ID
             const paperQuestionIds = [];
@@ -1790,24 +1840,14 @@ module.exports = function initRoutes(app, context) {
                     wrongAnswerDistribution: item.wrongAnswerDistribution
                 };
             });
-            res.json({ paperId, questions });
-        } catch (e) {
-            console.error('题目分析失败详情:', {
-                message: e.message,
-                stack: e.stack,
-                paperId: req.params.paperId,
-                userId: req.user ? req.user.id : 'unknown'
-            });
-            res.status(500).json({ error: '题目分析失败: ' + e.message });
-        }
+        res.json({ paperId, questions });
     });
 
     // ==================== 考试数据接口（考生端） ====================
     app.get('/api/exam/:paperId', async (req, res) => {
-        try {
-            const paperId = req.params.paperId;
-            const userId = req.user.id;
-            const user = await db.getUserById(userId);
+        const paperId = req.params.paperId;
+        const userId = req.user.id;
+        const user = await db.getUserById(userId);
 
             if (!user) {
                 return res.status(401).json({ error: '用户不存在' });
@@ -1818,45 +1858,75 @@ module.exports = function initRoutes(app, context) {
                 return res.status(404).json({ error: '试卷不存在或未发布' });
             }
 
-            // 检查是否在推送范围内
-            const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                ? paper.targetGroups.includes(user.groupId)
-                : false;
-            const inUsers = paper.targetUsers && paper.targetUsers.length > 0
-                ? paper.targetUsers.includes(user.id)
-                : false;
+            const assignment = await db.getUserExamAssignment(user.id, paper.id);
 
-            if (!inGroup && !inUsers) {
-                return res.status(403).json({ error: '无权参加该考试' });
-            }
+            if (assignment) {
+                const now = new Date();
+                const startValue = assignment.startTime || paper.startTime || null;
+                const deadlineValue = assignment.deadline || paper.deadline || null;
 
-            const now = new Date();
-            if (paper.startTime) {
-                const startTime = new Date(paper.startTime.replace(' ', 'T'));
-                if (now < startTime) {
-                    return res.status(400).json({ error: '考试未开始' });
+                if (startValue) {
+                    const startTime = new Date(String(startValue).replace(' ', 'T'));
+                    if (now < startTime) {
+                        return res.status(400).json({ error: '考试未开始' });
+                    }
                 }
-            }
-            if (paper.deadline) {
-                const deadline = new Date(paper.deadline.replace(' ', 'T'));
-                if (deadline < now) {
-                    return res.status(400).json({ error: '考试已截止' });
+                if (deadlineValue) {
+                    const deadline = new Date(String(deadlineValue).replace(' ', 'T'));
+                    if (deadline < now) {
+                        return res.status(400).json({ error: '考试已截止' });
+                    }
                 }
-            }
 
-            // 是否已参加
-            const record = await db.getRecordByUserAndPaper(user.id, paper.id);
-            if (record) {
-                // 如果已提交过，检查最后提交时间是否早于最新发布时间
-                if (paper.publishDate && record.submitDate) {
-                    const submitDate = new Date(record.submitDate);
-                    const publishDate = new Date(paper.publishDate);
-                    // 如果最后提交时间晚于发布时间，说明已经考过了最新推送的版本
-                    if (submitDate >= publishDate) {
+                const record = await db.getRecordByUserAndPaper(user.id, paper.id);
+                if (record) {
+                    if (assignment.assignedAt && record.submitDate) {
+                        const submitDate = new Date(record.submitDate);
+                        const assignedAt = new Date(assignment.assignedAt);
+                        if (submitDate >= assignedAt) {
+                            return res.status(400).json({ error: '您已参加过该考试' });
+                        }
+                    } else {
                         return res.status(400).json({ error: '您已参加过该考试' });
                     }
-                } else {
-                    return res.status(400).json({ error: '您已参加过该考试' });
+                }
+            } else {
+                const inGroup = paper.targetGroups && paper.targetGroups.length > 0
+                    ? paper.targetGroups.includes(user.groupId)
+                    : false;
+                const inUsers = paper.targetUsers && paper.targetUsers.length > 0
+                    ? paper.targetUsers.includes(user.id)
+                    : false;
+
+                if (!inGroup && !inUsers) {
+                    return res.status(403).json({ error: '无权参加该考试' });
+                }
+
+                const now = new Date();
+                if (paper.startTime) {
+                    const startTime = new Date(paper.startTime.replace(' ', 'T'));
+                    if (now < startTime) {
+                        return res.status(400).json({ error: '考试未开始' });
+                    }
+                }
+                if (paper.deadline) {
+                    const deadline = new Date(paper.deadline.replace(' ', 'T'));
+                    if (deadline < now) {
+                        return res.status(400).json({ error: '考试已截止' });
+                    }
+                }
+
+                const record = await db.getRecordByUserAndPaper(user.id, paper.id);
+                if (record) {
+                    if (paper.publishDate && record.submitDate) {
+                        const submitDate = new Date(record.submitDate);
+                        const publishDate = new Date(paper.publishDate);
+                        if (submitDate >= publishDate) {
+                            return res.status(400).json({ error: '您已参加过该考试' });
+                        }
+                    } else {
+                        return res.status(400).json({ error: '您已参加过该考试' });
+                    }
                 }
             }
 
@@ -1888,42 +1958,33 @@ module.exports = function initRoutes(app, context) {
                 });
             }
 
-            res.json({
-                paper: {
-                    id: paper.id,
-                    name: paper.name,
-                    rules: paper.rules || [],
-                    questions: paper.questions || {},
-                    startTime: paper.startTime || null,
-                    deadline: paper.deadline || null,
-                    shuffleQuestions: paper.shuffleQuestions || false,
-                    shuffleOptions: paper.shuffleOptions || false
-                },
-                questions: selectedQuestions,
-                session: {
-                    startTime: session.startTime,
-                    lastQuestionStartTime: session.lastQuestionStartTime,
-                    answers: session.answers
-                }
-            });
-        } catch (e) {
-            console.error('获取考试数据失败:', e);
-            res.status(500).json({ error: '获取考试数据失败' });
-        }
+        res.json({
+            paper: {
+                id: paper.id,
+                name: paper.name,
+                rules: paper.rules || [],
+                questions: paper.questions || {},
+                startTime: (assignment && assignment.startTime) || paper.startTime || null,
+                deadline: (assignment && assignment.deadline) || paper.deadline || null,
+                shuffleQuestions: paper.shuffleQuestions || false,
+                shuffleOptions: paper.shuffleOptions || false
+            },
+            questions: selectedQuestions,
+            session: {
+                startTime: session.startTime,
+                lastQuestionStartTime: session.lastQuestionStartTime,
+                answers: session.answers
+            }
+        });
     });
 
     app.put('/api/exam/:paperId/session', async (req, res) => {
-        try {
-            const paperId = req.params.paperId;
-            const userId = req.user.id;
-            const { answers, lastQuestionStartTime } = req.body;
+        const paperId = req.params.paperId;
+        const userId = req.user.id;
+        const { answers, lastQuestionStartTime } = req.body;
 
-            await db.updateExamSession(userId, paperId, answers, lastQuestionStartTime);
-            res.json({ success: true });
-        } catch (e) {
-            console.error('更新考试进度失败:', e);
-            res.status(500).json({ error: '更新考试进度失败' });
-        }
+        await db.updateExamSession(userId, paperId, answers, lastQuestionStartTime);
+        res.json({ success: true });
     });
 
     // ==================== 系统日志接口 ====================
@@ -1958,14 +2019,8 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.delete('/api/logs', superAdminMiddleware, async (req, res) => {
-        try {
-            await db.clearSystemLogs(null);
-            // 记录日志
-            await logAction('清空日志', 'logs', null, req.user, { all: true }, getClientIp(req));
-            res.json({ success: true });
-        } catch (e) {
-            console.error('清空日志失败:', e);
-            res.status(500).json({ error: '服务内部错误' });
-        }
+        await db.clearSystemLogs(null);
+        await logAction('清空日志', 'logs', null, req.user, { all: true }, getClientIp(req));
+        res.json({ success: true });
     });
 };

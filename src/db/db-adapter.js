@@ -171,11 +171,22 @@ const sqliteAdapter = {
                 answers TEXT,
                 UNIQUE(userId, paperId)
             );
+            CREATE TABLE IF NOT EXISTS user_exams (
+                id TEXT PRIMARY KEY,
+                userId TEXT NOT NULL,
+                paperId TEXT NOT NULL,
+                assignedAt TEXT NOT NULL,
+                startTime TEXT,
+                deadline TEXT,
+                UNIQUE(userId, paperId)
+            );
             CREATE INDEX IF NOT EXISTS idx_users_groupId ON users(groupId);
             CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions(groupId);
             CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers(groupId);
             CREATE INDEX IF NOT EXISTS idx_records_paperId ON records(paperId);
             CREATE INDEX IF NOT EXISTS idx_records_userId ON records(userId);
+            CREATE INDEX IF NOT EXISTS idx_user_exams_userId ON user_exams(userId);
+            CREATE INDEX IF NOT EXISTS idx_user_exams_paperId ON user_exams(paperId);
         `;
         this.db.run(tables);
 
@@ -391,11 +402,22 @@ const mysqlAdapter = {
                 answers TEXT,
                 UNIQUE(userId, paperId)
             )`,
+            `CREATE TABLE IF NOT EXISTS user_exams (
+                id VARCHAR(255) PRIMARY KEY,
+                userId VARCHAR(255) NOT NULL,
+                paperId VARCHAR(255) NOT NULL,
+                assignedAt VARCHAR(50) NOT NULL,
+                startTime VARCHAR(50),
+                deadline VARCHAR(50),
+                UNIQUE KEY uniq_user_paper (userId, paperId)
+            )`,
             `CREATE INDEX idx_users_groupId ON users(groupId)`,
             `CREATE INDEX idx_questions_groupId ON questions(groupId)`,
             `CREATE INDEX idx_papers_groupId ON papers(groupId)`,
             `CREATE INDEX idx_records_paperId ON records(paperId)`,
-            `CREATE INDEX idx_records_userId ON records(userId)`
+            `CREATE INDEX idx_records_userId ON records(userId)`,
+            `CREATE INDEX idx_user_exams_userId ON user_exams(userId)`,
+            `CREATE INDEX idx_user_exams_paperId ON user_exams(paperId)`
         ];
 
         for (const sql of tables) {
@@ -636,11 +658,22 @@ const postgresAdapter = {
                 answers TEXT,
                 UNIQUE("userId", "paperId")
             )`,
+            `CREATE TABLE IF NOT EXISTS user_exams (
+                id VARCHAR(255) PRIMARY KEY,
+                "userId" VARCHAR(255) NOT NULL,
+                "paperId" VARCHAR(255) NOT NULL,
+                "assignedAt" VARCHAR(50) NOT NULL,
+                "startTime" VARCHAR(50),
+                deadline VARCHAR(50),
+                UNIQUE("userId", "paperId")
+            )`,
             `CREATE INDEX IF NOT EXISTS idx_users_groupId ON users("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_records_paperId ON records("paperId")`,
-            `CREATE INDEX IF NOT EXISTS idx_records_userId ON records("userId")`
+            `CREATE INDEX IF NOT EXISTS idx_records_userId ON records("userId")`,
+            `CREATE INDEX IF NOT EXISTS idx_user_exams_userId ON user_exams("userId")`,
+            `CREATE INDEX IF NOT EXISTS idx_user_exams_paperId ON user_exams("paperId")`
         ];
 
         for (const sql of tables) {
@@ -961,6 +994,69 @@ async function run(sql, params = []) {
     await currentDb.run(sql, params);
 }
 
+function parseJsonValue(raw, fallback) {
+    if (raw === null || raw === undefined || raw === '') return fallback;
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function normalizeRecord(record) {
+    return {
+        ...record,
+        answers: parseJsonValue(record.answers, {})
+    };
+}
+
+function normalizePaper(paper) {
+    return {
+        ...paper,
+        questions: parseJsonValue(paper.questions, {}),
+        rules: parseJsonValue(paper.rules, []),
+        targetGroups: parseJsonValue(paper.targetGroups, []),
+        targetUsers: parseJsonValue(paper.targetUsers, []),
+        shuffleQuestions: !!paper.shuffleQuestions,
+        shuffleOptions: !!paper.shuffleOptions,
+        passScore: paper.passScore == null ? 0 : Number(paper.passScore)
+    };
+}
+
+function buildSystemLogFilter(filter = {}) {
+    const conditions = [];
+    const params = [];
+    if (filter.action) {
+        conditions.push("action = ?");
+        params.push(filter.action);
+    }
+    if (filter.target) {
+        conditions.push("target = ?");
+        params.push(filter.target);
+    }
+    if (filter.userId) {
+        conditions.push("userId = ?");
+        params.push(filter.userId);
+    }
+    if (filter.startDate) {
+        conditions.push("createdAt >= ?");
+        params.push(filter.startDate);
+    }
+    if (filter.endDate) {
+        conditions.push("createdAt <= ?");
+        params.push(filter.endDate);
+    }
+    return { conditions, params };
+}
+
+function buildSelectSql(table, conditions) {
+    let sql = `SELECT * FROM ${table}`;
+    if (conditions.length > 0) {
+        sql += " WHERE " + conditions.join(" AND ");
+    }
+    return sql;
+}
+
 // 导出模块
 module.exports = {
     initDatabase,
@@ -979,7 +1075,6 @@ module.exports = {
 
     // ==================== 用户相关 ====================
     getUsers: async (filter = {}) => {
-        let sql = "SELECT * FROM users";
         const params = [];
         const conditions = [];
 
@@ -992,10 +1087,7 @@ module.exports = {
             params.push('%,' + filter.groupId);     // 结尾
         }
 
-        if (conditions.length > 0) {
-            sql += " WHERE " + conditions.join(" AND ");
-        }
-
+        const sql = buildSelectSql('users', conditions);
         return sanitizeUsers(await query(sql, params));
     },
     getUserById: async (id) => {
@@ -1040,10 +1132,6 @@ module.exports = {
         }
         return sanitizeUser(user);
     },
-    updateUserFeishuInfo: async (userId, feishuUserId, feishuOpenId) => {
-        await run("UPDATE users SET feishuUserId=?, feishuOpenId=?, isFirstLogin=0 WHERE id=?", [feishuUserId, feishuOpenId, userId]);
-        return true;
-    },
     changePassword: async (userId, newPassword) => {
         const hashedPwd = await hashPassword(newPassword);
         await run("UPDATE users SET password=?, isFirstLogin=0 WHERE id=?", [hashedPwd, userId]);
@@ -1080,7 +1168,6 @@ module.exports = {
 
     // ==================== 题目相关 ====================
     getQuestions: async (filter = {}) => {
-        let sql = "SELECT * FROM questions";
         const params = [];
         const conditions = [];
 
@@ -1101,10 +1188,7 @@ module.exports = {
             conditions.push("groupId IS NULL");
         }
 
-        if (conditions.length > 0) {
-            sql += " WHERE " + conditions.join(" AND ");
-        }
-
+        const sql = buildSelectSql('questions', conditions);
         const rows = await query(sql, params);
         return rows.map(q => {
             let options = [];
@@ -1184,7 +1268,6 @@ module.exports = {
 
     // ==================== 试卷相关 ====================
     getPapers: async (filter = {}) => {
-        let sql = "SELECT * FROM papers";
         const params = [];
         const conditions = [];
 
@@ -1198,60 +1281,14 @@ module.exports = {
             params.push(filter.creatorId);
         }
 
-        if (conditions.length > 0) {
-            sql += " WHERE " + conditions.join(" AND ");
-        }
-
+        const sql = buildSelectSql('papers', conditions);
         const rows = await query(sql, params);
-        return rows.map(p => ({
-            ...p,
-            questions: p.questions ? JSON.parse(p.questions) : {},
-            rules: p.rules ? JSON.parse(p.rules) : [],
-            targetGroups: p.targetGroups ? JSON.parse(p.targetGroups) : [],
-            targetUsers: p.targetUsers ? JSON.parse(p.targetUsers) : [],
-            shuffleQuestions: !!p.shuffleQuestions,
-            shuffleOptions: !!p.shuffleOptions,
-            passScore: p.passScore == null ? 0 : Number(p.passScore)
-        }));
+        return rows.map(normalizePaper);
     },
     getPaperById: async (id) => {
         const rows = await query("SELECT * FROM papers WHERE id = ?", [id]);
         if (rows.length === 0) return null;
-        const p = rows[0];
-        let questions = {};
-        let rules = [];
-        let targetGroups = [];
-        let targetUsers = [];
-        try {
-            questions = p.questions ? JSON.parse(p.questions) : {};
-        } catch (e) {
-            console.error(`解析试卷 ${id} questions 失败:`, e);
-        }
-        try {
-            rules = p.rules ? JSON.parse(p.rules) : [];
-        } catch (e) {
-            console.error(`解析试卷 ${id} rules 失败:`, e);
-        }
-        try {
-            targetGroups = p.targetGroups ? JSON.parse(p.targetGroups) : [];
-        } catch (e) {
-            console.error(`解析试卷 ${id} targetGroups 失败:`, e);
-        }
-        try {
-            targetUsers = p.targetUsers ? JSON.parse(p.targetUsers) : [];
-        } catch (e) {
-            console.error(`解析试卷 ${id} targetUsers 失败:`, e);
-        }
-        return {
-            ...p,
-            questions,
-            rules,
-            targetGroups,
-            targetUsers,
-            shuffleQuestions: !!p.shuffleQuestions,
-            shuffleOptions: !!p.shuffleOptions,
-            passScore: p.passScore == null ? 0 : Number(p.passScore)
-        };
+        return normalizePaper(rows[0]);
     },
     addPaper: async (paper) => {
         const id = paper.id || generateId('p_');
@@ -1284,25 +1321,11 @@ module.exports = {
     // ==================== 记录相关 ====================
     getRecords: async () => {
         const rows = await query("SELECT * FROM records");
-        return rows.map(r => ({
-            ...r,
-            answers: r.answers ? JSON.parse(r.answers) : {}
-        }));
+        return rows.map(normalizeRecord);
     },
     getRecordsByPaper: async (paperId) => {
         const rows = await query("SELECT * FROM records WHERE paperId = ?", [paperId]);
-        return rows.map(r => {
-            let answers = {};
-            try {
-                answers = r.answers ? JSON.parse(r.answers) : {};
-            } catch (e) {
-                console.error(`解析记录 ${r.id} answers 失败:`, e);
-            }
-            return {
-                ...r,
-                answers
-            };
-        });
+        return rows.map(normalizeRecord);
     },
     addRecord: async (record) => {
         // 检查是否已存在记录，如果存在则更新（只保留最后一次成绩）
@@ -1325,10 +1348,6 @@ module.exports = {
     getRecordByUserAndPaper: async (userId, paperId) => {
         const rows = await query("SELECT * FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
         return rows.length > 0 ? rows[0] : null;
-    },
-    hasUserTakenExam: async (userId, paperId) => {
-        const rows = await query("SELECT id FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
-        return rows.length > 0;
     },
 
     // ==================== 考试会话相关 ====================
@@ -1359,6 +1378,58 @@ module.exports = {
     },
     deleteExamSession: async (userId, paperId) => {
         await run("DELETE FROM exam_sessions WHERE userId = ? AND paperId = ?", [userId, paperId]);
+    },
+    savePushTask: async ({ paperId, targetGroups, targetUsers, startTime, deadline, pushTime }) => {
+        const users = await query("SELECT id, role, groupId FROM users", []);
+        const studentUsers = users.filter(u => u.role === 'student');
+        const groupIds = Array.isArray(targetGroups) ? targetGroups : [];
+        const userIds = Array.isArray(targetUsers) ? targetUsers : [];
+        const assignedUserIdSet = new Set();
+
+        if (groupIds.length > 0) {
+            studentUsers.forEach(u => {
+                if (u.groupId && groupIds.includes(u.groupId)) {
+                    assignedUserIdSet.add(u.id);
+                }
+            });
+        }
+
+        if (userIds.length > 0) {
+            userIds.forEach(id => {
+                if (studentUsers.find(u => u.id === id)) {
+                    assignedUserIdSet.add(id);
+                }
+            });
+        }
+
+        if (assignedUserIdSet.size === 0) {
+            return;
+        }
+
+        const assignedAt = pushTime || new Date().toISOString();
+        const start = startTime || null;
+        const end = deadline || null;
+
+        for (const userId of assignedUserIdSet) {
+            const existing = await query("SELECT id FROM user_exams WHERE userId = ? AND paperId = ?", [userId, paperId]);
+            if (existing.length > 0) {
+                const existingId = existing[0].id;
+                await run("UPDATE user_exams SET assignedAt = ?, startTime = ?, deadline = ? WHERE id = ?",
+                    [assignedAt, start, end, existingId]);
+            } else {
+                const id = generateId('ue_');
+                await run("INSERT INTO user_exams (id, userId, paperId, assignedAt, startTime, deadline) VALUES (?, ?, ?, ?, ?, ?)",
+                    [id, userId, paperId, assignedAt, start, end]);
+            }
+        }
+    },
+    getUserAssignedPapers: async (userId) => {
+        const rows = await query("SELECT * FROM user_exams WHERE userId = ?", [userId]);
+        return rows;
+    },
+    getUserExamAssignment: async (userId, paperId) => {
+        const rows = await query("SELECT * FROM user_exams WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        return rows.length > 0 ? rows[0] : null;
     },
 
     // ==================== 推送记录相关 ====================
@@ -1413,45 +1484,11 @@ module.exports = {
 
     getSystemLogs: async (filter = {}) => {
         let sql = "SELECT * FROM system_logs";
-        const params = [];
-        const conditions = [];
+        const { conditions, params } = buildSystemLogFilter(filter);
+        if (conditions.length > 0) sql += " WHERE " + conditions.join(" AND ");
 
-        // 操作类型筛选
-        if (filter.action) {
-            conditions.push("action = ?");
-            params.push(filter.action);
-        }
-
-        // 操作对象筛选
-        if (filter.target) {
-            conditions.push("target = ?");
-            params.push(filter.target);
-        }
-
-        // 用户筛选
-        if (filter.userId) {
-            conditions.push("userId = ?");
-            params.push(filter.userId);
-        }
-
-        // 时间范围筛选
-        if (filter.startDate) {
-            conditions.push("createdAt >= ?");
-            params.push(filter.startDate);
-        }
-        if (filter.endDate) {
-            conditions.push("createdAt <= ?");
-            params.push(filter.endDate);
-        }
-
-        if (conditions.length > 0) {
-            sql += " WHERE " + conditions.join(" AND ");
-        }
-
-        // 按时间倒序
         sql += " ORDER BY createdAt DESC";
 
-        // 分页
         if (filter.limit) {
             sql += " LIMIT ?";
             params.push(filter.limit);
@@ -1464,39 +1501,14 @@ module.exports = {
         const rows = await query(sql, params);
         return rows.map(log => ({
             ...log,
-            details: log.details ? JSON.parse(log.details) : {}
+            details: parseJsonValue(log.details, {})
         }));
     },
 
     getSystemLogsCount: async (filter = {}) => {
         let sql = "SELECT COUNT(*) as count FROM system_logs";
-        const params = [];
-        const conditions = [];
-
-        if (filter.action) {
-            conditions.push("action = ?");
-            params.push(filter.action);
-        }
-        if (filter.target) {
-            conditions.push("target = ?");
-            params.push(filter.target);
-        }
-        if (filter.userId) {
-            conditions.push("userId = ?");
-            params.push(filter.userId);
-        }
-        if (filter.startDate) {
-            conditions.push("createdAt >= ?");
-            params.push(filter.startDate);
-        }
-        if (filter.endDate) {
-            conditions.push("createdAt <= ?");
-            params.push(filter.endDate);
-        }
-
-        if (conditions.length > 0) {
-            sql += " WHERE " + conditions.join(" AND ");
-        }
+        const { conditions, params } = buildSystemLogFilter(filter);
+        if (conditions.length > 0) sql += " WHERE " + conditions.join(" AND ");
 
         const rows = await query(sql, params);
         return rows[0]?.count || 0;
@@ -1508,9 +1520,5 @@ module.exports = {
         } else {
             await run("DELETE FROM system_logs");
         }
-    },
-    
-    // 导出内部方法用于重置工具
-    _run: async (sql, params) => await run(sql, params),
-    _query: async (sql, params) => await query(sql, params)
+    }
 };
