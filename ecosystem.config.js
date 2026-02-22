@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-require('dotenv').config();
+require('dotenv').config({ override: true });
 
 const useRedis = process.env.USE_REDIS === 'true';
 const dbType = (process.env.DB_TYPE || 'sqlite').toLowerCase();

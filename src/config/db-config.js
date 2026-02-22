@@ -4,7 +4,7 @@
  * 敏感信息通过环境变量配置，不通过前端传递
  * 支持 .env 文件或系统环境变量
  */
-require('dotenv').config();
+require('dotenv').config({ override: true });
 
 // 获取当前活动数据库类型
 function getActiveDb() {
