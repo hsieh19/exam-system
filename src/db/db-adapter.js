@@ -254,7 +254,7 @@ const sqliteAdapter = {
             return results;
         } catch (e) {
             console.error('SQLite query error:', e.message || e);
-            return [];
+            throw e;
         }
     },
 
@@ -264,6 +264,7 @@ const sqliteAdapter = {
             this.save();
         } catch (e) {
             console.error('SQLite run error:', e.message || e);
+            throw e;
         }
     },
 
@@ -324,7 +325,8 @@ const mysqlAdapter = {
                 groupId VARCHAR(255),
                 isFirstLogin TINYINT DEFAULT 1,
                 feishuUserId VARCHAR(255),
-                feishuOpenId VARCHAR(255)
+                feishuOpenId VARCHAR(255),
+                feishuEnabled TINYINT DEFAULT 1
             )`,
             `CREATE TABLE IF NOT EXISTS \`groups\` (
                 id VARCHAR(255) PRIMARY KEY,
@@ -339,7 +341,10 @@ const mysqlAdapter = {
                 category VARCHAR(255),
                 deviceType VARCHAR(255),
                 groupId VARCHAR(255),
-                updatedAt VARCHAR(50)
+                must TINYINT DEFAULT 0,
+                updatedAt VARCHAR(50),
+                correctCount INT DEFAULT 0,
+                totalCount INT DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
@@ -422,7 +427,7 @@ const mysqlAdapter = {
 
         for (const sql of tables) {
             try {
-                await this.pool.execute(sql);
+                await this.pool.query(sql);
             } catch (e) {
                 if (!e.message.includes('already exists') &&
                     !e.message.includes('Duplicate key name') &&
@@ -432,74 +437,99 @@ const mysqlAdapter = {
             }
         }
 
-        // 数据库迁移：检查 isFirstLogin 字段是否存在
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'isFirstLogin'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM users LIKE 'isFirstLogin'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding isFirstLogin column to users table');
-                await this.pool.execute("ALTER TABLE users ADD COLUMN isFirstLogin TINYINT DEFAULT 1");
-            }
-            
-            const [fsUserIdCol] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'feishuUserId'");
-            if (fsUserIdCol.length === 0) {
-                console.log('MySQL: Adding feishuUserId column to users table');
-                await this.pool.execute("ALTER TABLE users ADD COLUMN feishuUserId VARCHAR(255)");
+                await this.pool.query("ALTER TABLE users ADD COLUMN isFirstLogin TINYINT DEFAULT 1");
             }
 
-            const [fsOpenIdCol] = await this.pool.execute("SHOW COLUMNS FROM users LIKE 'feishuOpenId'");
+            const [fsUserIdCol] = await this.pool.query("SHOW COLUMNS FROM users LIKE 'feishuUserId'");
+            if (fsUserIdCol.length === 0) {
+                console.log('MySQL: Adding feishuUserId column to users table');
+                await this.pool.query("ALTER TABLE users ADD COLUMN feishuUserId VARCHAR(255)");
+            }
+
+            const [fsOpenIdCol] = await this.pool.query("SHOW COLUMNS FROM users LIKE 'feishuOpenId'");
             if (fsOpenIdCol.length === 0) {
                 console.log('MySQL: Adding feishuOpenId column to users table');
-                await this.pool.execute("ALTER TABLE users ADD COLUMN feishuOpenId VARCHAR(255)");
+                await this.pool.query("ALTER TABLE users ADD COLUMN feishuOpenId VARCHAR(255)");
+            }
+
+            const [fsEnabledCol] = await this.pool.query("SHOW COLUMNS FROM users LIKE 'feishuEnabled'");
+            if (fsEnabledCol.length === 0) {
+                console.log('MySQL: Adding feishuEnabled column to users table');
+                await this.pool.query("ALTER TABLE users ADD COLUMN feishuEnabled TINYINT DEFAULT 1");
             }
         } catch (e) {
             console.error('MySQL migration error:', e.message);
         }
 
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM papers LIKE 'published'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM papers LIKE 'published'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding published column to papers table');
-                await this.pool.execute("ALTER TABLE papers ADD COLUMN published TINYINT DEFAULT 0");
+                await this.pool.query("ALTER TABLE papers ADD COLUMN published TINYINT DEFAULT 0");
             }
         } catch (e) {
             console.error('MySQL migration error (papers.published):', e.message);
         }
 
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM papers LIKE 'publishDate'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM papers LIKE 'publishDate'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding publishDate column to papers table');
-                await this.pool.execute("ALTER TABLE papers ADD COLUMN publishDate VARCHAR(50)");
+                await this.pool.query("ALTER TABLE papers ADD COLUMN publishDate VARCHAR(50)");
             }
         } catch (e) {
             console.error('MySQL migration error (papers.publishDate):', e.message);
         }
 
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM exam_sessions LIKE 'lastQuestionStartTime'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM exam_sessions LIKE 'lastQuestionStartTime'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding lastQuestionStartTime column to exam_sessions table');
-                await this.pool.execute("ALTER TABLE exam_sessions ADD COLUMN lastQuestionStartTime VARCHAR(50)");
+                await this.pool.query("ALTER TABLE exam_sessions ADD COLUMN lastQuestionStartTime VARCHAR(50)");
             }
         } catch (e) {
             console.error('MySQL migration error (exam_sessions.lastQuestionStartTime):', e.message);
         }
 
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM questions LIKE 'correctCount'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM questions LIKE 'must'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding must column to questions table');
+                await this.pool.query("ALTER TABLE questions ADD COLUMN must TINYINT DEFAULT 0");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (questions.must):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM questions LIKE 'updatedAt'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding updatedAt column to questions table');
+                await this.pool.query("ALTER TABLE questions ADD COLUMN updatedAt VARCHAR(50)");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (questions.updatedAt):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM questions LIKE 'correctCount'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding correctCount column to questions table');
-                await this.pool.execute("ALTER TABLE questions ADD COLUMN correctCount INT DEFAULT 0");
+                await this.pool.query("ALTER TABLE questions ADD COLUMN correctCount INT DEFAULT 0");
             }
         } catch (e) {
             console.error('MySQL migration error (questions.correctCount):', e.message);
         }
 
         try {
-            const [columns] = await this.pool.execute("SHOW COLUMNS FROM questions LIKE 'totalCount'");
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM questions LIKE 'totalCount'");
             if (columns.length === 0) {
                 console.log('MySQL: Adding totalCount column to questions table');
-                await this.pool.execute("ALTER TABLE questions ADD COLUMN totalCount INT DEFAULT 0");
+                await this.pool.query("ALTER TABLE questions ADD COLUMN totalCount INT DEFAULT 0");
             }
         } catch (e) {
             console.error('MySQL migration error (questions.totalCount):', e.message);
@@ -509,12 +539,12 @@ const mysqlAdapter = {
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
 
-        const [countRows] = await this.pool.execute("SELECT COUNT(1) AS cnt FROM users");
+        const [countRows] = await this.pool.query("SELECT COUNT(1) AS cnt FROM users");
         const userCount = Number(countRows?.[0]?.cnt || 0);
         if (userCount === 0) {
             console.log(`正在初始化管理员账号: ${adminUsername}`);
             const hashedPwd = await hashPassword(adminPassword);
-            await this.pool.execute(
+            await this.pool.query(
                 "INSERT INTO users (id, username, password, role, isFirstLogin) VALUES (?, ?, ?, ?, ?)",
                 ['admin-001', adminUsername, hashedPwd, 'super_admin', 0]
             );
@@ -523,19 +553,21 @@ const mysqlAdapter = {
 
     async query(sql, params = []) {
         try {
-            const [rows] = await this.pool.execute(sql, params);
+            // 使用 query 而非 execute 以获得更好的兼容性（某些 MySQL 版本在预处理语句中对 LIMIT/OFFSET 处理较严）
+            const [rows] = await this.pool.query(sql, params);
             return rows;
         } catch (e) {
             console.error('MySQL query error:', e.message || e);
-            return [];
+            throw e;
         }
     },
 
     async run(sql, params = []) {
         try {
-            await this.pool.execute(sql, params);
+            await this.pool.query(sql, params);
         } catch (e) {
             console.error('MySQL run error:', e.message || e);
+            throw e;
         }
     },
 
@@ -582,7 +614,10 @@ const postgresAdapter = {
                 password VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'student',
                 groupId VARCHAR(255),
-                "isFirstLogin" INTEGER DEFAULT 1
+                "isFirstLogin" INTEGER DEFAULT 1,
+                "feishuUserId" VARCHAR(255),
+                "feishuOpenId" VARCHAR(255),
+                "feishuEnabled" INTEGER DEFAULT 1
             )`,
             `CREATE TABLE IF NOT EXISTS groups (
                 id VARCHAR(255) PRIMARY KEY,
@@ -597,7 +632,10 @@ const postgresAdapter = {
                 category VARCHAR(255),
                 "deviceType" VARCHAR(255),
                 "groupId" VARCHAR(255),
-                "updatedAt" VARCHAR(50)
+                "must" INTEGER DEFAULT 0,
+                "updatedAt" VARCHAR(50),
+                "correctCount" INT DEFAULT 0,
+                "totalCount" INT DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS papers (
                 id VARCHAR(255) PRIMARY KEY,
@@ -680,7 +718,6 @@ const postgresAdapter = {
             await this.pool.query(sql);
         }
 
-        // 数据库迁移：检查 isFirstLogin 字段是否存在
         try {
             const result = await this.pool.query(`
                 SELECT column_name 
@@ -710,6 +747,16 @@ const postgresAdapter = {
             if (fsOpenIdResult.rows.length === 0) {
                 console.log('PostgreSQL: Adding feishuOpenId column to users table');
                 await this.pool.query('ALTER TABLE users ADD COLUMN "feishuOpenId" VARCHAR(255)');
+            }
+
+            const fsEnabledResult = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name='feishuEnabled'
+            `);
+            if (fsEnabledResult.rows.length === 0) {
+                console.log('PostgreSQL: Adding feishuEnabled column to users table');
+                await this.pool.query('ALTER TABLE users ADD COLUMN "feishuEnabled" INTEGER DEFAULT 1');
             }
         } catch (e) {
             console.error('PostgreSQL migration error:', e.message);
@@ -741,6 +788,34 @@ const postgresAdapter = {
             }
         } catch (e) {
             console.error('PostgreSQL migration error (papers.publishDate):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='questions' AND column_name='must'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding must column to questions table');
+                await this.pool.query('ALTER TABLE questions ADD COLUMN "must" INTEGER DEFAULT 0');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (questions.must):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='questions' AND column_name='updatedAt'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding updatedAt column to questions table');
+                await this.pool.query('ALTER TABLE questions ADD COLUMN "updatedAt" VARCHAR(50)');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (questions.updatedAt):', e.message);
         }
 
         try {
@@ -812,7 +887,7 @@ const postgresAdapter = {
             return result.rows;
         } catch (e) {
             console.error('PostgreSQL query error:', e.message || e);
-            return [];
+            throw e;
         }
     },
 
@@ -825,6 +900,7 @@ const postgresAdapter = {
             await this.pool.query(pgSql, params);
         } catch (e) {
             console.error('PostgreSQL run error:', e.message || e);
+            throw e;
         }
     },
 
@@ -870,7 +946,7 @@ async function switchDatabase(newDbType) {
     const data = {};
     if (currentDb) {
         try {
-            const tables = ['users', 'groups', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs'];
+            const tables = ['users', 'groups', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs', 'exam_sessions', 'user_exams'];
             for (const table of tables) {
                 // Use safe table names
                 const tableName = getSafeName(table, currentDbType);
@@ -900,7 +976,7 @@ async function switchDatabase(newDbType) {
     try {
         // Clear newly created default data (like admin/student from init) to avoid conflicts
         // Order: Delete dependents first
-        const clearOrder = ['system_logs', 'push_logs', 'records', 'papers', 'questions', 'categories', 'users', 'groups'];
+        const clearOrder = ['system_logs', 'push_logs', 'records', 'papers', 'questions', 'categories', 'exam_sessions', 'user_exams', 'users', 'groups'];
         for (const table of clearOrder) {
             const tableName = getSafeName(table, currentDbType);
             await currentDb.run(`DELETE FROM ${tableName}`);
@@ -908,7 +984,7 @@ async function switchDatabase(newDbType) {
 
         // Import
         // Order: Insert independents first
-        const importOrder = ['groups', 'users', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs'];
+        const importOrder = ['groups', 'users', 'categories', 'questions', 'papers', 'records', 'push_logs', 'system_logs', 'exam_sessions', 'user_exams'];
         for (const table of importOrder) {
             const rows = data[table];
             if (!rows || !rows.length) continue;
@@ -930,6 +1006,23 @@ async function switchDatabase(newDbType) {
         // Manual Save for SQLite if needed (though run() usually saves)
         if (currentDbType === 'sqlite' && currentDb.save) {
             currentDb.save();
+        }
+
+        // 4. Persist to .env file
+        try {
+            const envPath = path.join(baseDir, '.env');
+            if (fs.existsSync(envPath)) {
+                let envContent = fs.readFileSync(envPath, 'utf8');
+                if (envContent.includes('DB_TYPE=')) {
+                    envContent = envContent.replace(/DB_TYPE=.*/, `DB_TYPE=${newDbType}`);
+                } else {
+                    envContent += `\nDB_TYPE=${newDbType}`;
+                }
+                fs.writeFileSync(envPath, envContent);
+                console.log(`[SwitchDB] .env updated to DB_TYPE=${newDbType}`);
+            }
+        } catch (envErr) {
+            console.warn('[SwitchDB] Failed to update .env:', envErr.message);
         }
 
         console.log('[SwitchDB] Migration successful.');
@@ -1027,30 +1120,30 @@ function buildSystemLogFilter(filter = {}) {
     const conditions = [];
     const params = [];
     if (filter.action) {
-        conditions.push("action = ?");
+        conditions.push("`action` = ?");
         params.push(filter.action);
     }
     if (filter.target) {
-        conditions.push("target = ?");
+        conditions.push("`target` = ?");
         params.push(filter.target);
     }
     if (filter.userId) {
-        conditions.push("userId = ?");
+        conditions.push("`userId` = ?");
         params.push(filter.userId);
     }
     if (filter.startDate) {
-        conditions.push("createdAt >= ?");
+        conditions.push("`createdAt` >= ?");
         params.push(filter.startDate);
     }
     if (filter.endDate) {
-        conditions.push("createdAt <= ?");
+        conditions.push("`createdAt` <= ?");
         params.push(filter.endDate);
     }
     return { conditions, params };
 }
 
 function buildSelectSql(table, conditions) {
-    let sql = `SELECT * FROM ${table}`;
+    let sql = `SELECT * FROM ${getSafeName(table, currentDbType)}`;
     if (conditions.length > 0) {
         sql += " WHERE " + conditions.join(" AND ");
     }
@@ -1091,20 +1184,20 @@ module.exports = {
         return sanitizeUsers(await query(sql, params));
     },
     getUserById: async (id) => {
-        const rows = await query("SELECT * FROM users WHERE id = ?", [id]);
+        const rows = await query("SELECT * FROM `users` WHERE `id` = ?", [id]);
         return sanitizeUser(rows[0]);
     },
     getUserByUsername: async (username) => {
-        const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
+        const rows = await query("SELECT * FROM `users` WHERE `username` = ?", [username]);
         return rows[0];
     },
     getUserByFeishuId: async (feishuUserId, feishuOpenId) => {
         if (feishuUserId) {
-            const rows = await query("SELECT * FROM users WHERE feishuUserId = ?", [feishuUserId]);
+            const rows = await query("SELECT * FROM `users` WHERE `feishuUserId` = ?", [feishuUserId]);
             if (rows.length > 0) return rows[0];
         }
         if (feishuOpenId) {
-            const rows = await query("SELECT * FROM users WHERE feishuOpenId = ?", [feishuOpenId]);
+            const rows = await query("SELECT * FROM `users` WHERE `feishuOpenId` = ?", [feishuOpenId]);
             if (rows.length > 0) return rows[0];
         }
         return null;
@@ -1112,33 +1205,33 @@ module.exports = {
     addUser: async (user) => {
         const id = user.id || generateId('u_');
         const hashedPwd = await hashPassword(user.password);
-        await run("INSERT INTO users (id, username, password, role, groupId, isFirstLogin, feishuUserId, feishuOpenId, feishuEnabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO `users` (`id`, `username`, `password`, `role`, `groupId`, `isFirstLogin`, `feishuUserId`, `feishuOpenId`, `feishuEnabled`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, user.username, hashedPwd, user.role || 'student', user.groupId || null, user.isFirstLogin !== undefined ? user.isFirstLogin : 1, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1]);
         return { id, ...user, password: undefined, isFirstLogin: user.isFirstLogin !== undefined ? user.isFirstLogin : 1, feishuEnabled: user.feishuEnabled !== undefined ? user.feishuEnabled : 1 };
     },
     deleteUser: async (id) => {
-        await run("DELETE FROM users WHERE id = ?", [id]);
+        await run("DELETE FROM `users` WHERE `id` = ?", [id]);
     },
     updateUser: async (user) => {
         if (user.password) {
             const hashedPwd = await hashPassword(user.password);
             // 如果提供了密码，默认重置 isFirstLogin 为 1，除非明确指定
             const isFirstLogin = user.isFirstLogin !== undefined ? user.isFirstLogin : 1;
-            await run("UPDATE users SET username=?, password=?, role=?, groupId=?, isFirstLogin=?, feishuUserId=?, feishuOpenId=?, feishuEnabled=? WHERE id=?",
+            await run("UPDATE `users` SET `username`=?, `password`=?, `role`=?, `groupId`=?, `isFirstLogin`=?, `feishuUserId`=?, `feishuOpenId`=?, `feishuEnabled`=? WHERE `id`=?",
                 [user.username, hashedPwd, user.role, user.groupId, isFirstLogin, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         } else {
-            await run("UPDATE users SET username=?, role=?, groupId=?, feishuUserId=?, feishuOpenId=?, feishuEnabled=? WHERE id=?",
+            await run("UPDATE `users` SET `username`=?, `role`=?, `groupId`=?, `feishuUserId`=?, `feishuOpenId`=?, `feishuEnabled`=? WHERE `id`=?",
                 [user.username, user.role, user.groupId, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         }
         return sanitizeUser(user);
     },
     changePassword: async (userId, newPassword) => {
         const hashedPwd = await hashPassword(newPassword);
-        await run("UPDATE users SET password=?, isFirstLogin=0 WHERE id=?", [hashedPwd, userId]);
+        await run("UPDATE `users` SET `password`=?, `isFirstLogin`=0 WHERE `id`=?", [hashedPwd, userId]);
         return true;
     },
     login: async (username, password) => {
-        const rows = await query("SELECT * FROM users WHERE username = ?", [username]);
+        const rows = await query("SELECT * FROM `users` WHERE `username` = ?", [username]);
         if (rows.length === 0) return null;
         const user = rows[0];
         if (await verifyPassword(password, user.password)) {
@@ -1148,22 +1241,22 @@ module.exports = {
     },
 
     // ==================== 分组相关 ====================
-    getGroups: async () => await query("SELECT * FROM groups"),
+    getGroups: async () => await query("SELECT * FROM `groups`"),
     getGroupByName: async (name) => {
-        const rows = await query("SELECT * FROM groups WHERE name = ?", [name]);
+        const rows = await query("SELECT * FROM `groups` WHERE name = ?", [name]);
         return rows[0];
     },
     addGroup: async (group) => {
         const id = group.id || generateId('g_');
-        await run("INSERT INTO groups (id, name) VALUES (?, ?)", [id, group.name]);
+        await run("INSERT INTO `groups` (id, name) VALUES (?, ?)", [id, group.name]);
         return { id, ...group };
     },
     updateGroup: async (group) => {
-        await run("UPDATE groups SET name = ? WHERE id = ?", [group.name, group.id]);
+        await run("UPDATE `groups` SET name = ? WHERE id = ?", [group.name, group.id]);
         return group;
     },
     deleteGroup: async (id) => {
-        await run("DELETE FROM groups WHERE id = ?", [id]);
+        await run("DELETE FROM `groups` WHERE id = ?", [id]);
     },
 
     // ==================== 题目相关 ====================
@@ -1233,26 +1326,26 @@ module.exports = {
     addQuestion: async (q) => {
         const id = q.id || generateId('q_');
         const now = new Date().toISOString();
-        await run("INSERT INTO questions (id, type, content, options, answer, category, deviceType, groupId, must, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO `questions` (`id`, `type`, `content`, `options`, `answer`, `category`, `deviceType`, `groupId`, `must`, `updatedAt`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now]);
         return { id, ...q, updatedAt: now };
     },
     updateQuestion: async (q) => {
         const now = new Date().toISOString();
-        await run("UPDATE questions SET type=?, content=?, options=?, answer=?, category=?, deviceType=?, groupId=?, must=?, updatedAt=? WHERE id=?",
+        await run("UPDATE `questions` SET `type`=?, `content`=?, `options`=?, `answer`=?, `category`=?, `deviceType`=?, `groupId`=?, `must`=?, `updatedAt`=? WHERE `id`=?",
             [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now, q.id]);
         return { ...q, updatedAt: now };
     },
     deleteQuestion: async (id) => {
-        await run("DELETE FROM questions WHERE id = ?", [id]);
+        await run("DELETE FROM `questions` WHERE `id` = ?", [id]);
     },
     deleteQuestions: async (groupId = undefined) => {
         if (groupId === 'all' || groupId === undefined) {
-            await run("DELETE FROM questions");
+            await run("DELETE FROM `questions` ");
         } else if (groupId === 'public') {
-            await run("DELETE FROM questions WHERE groupId IS NULL OR groupId = ''");
+            await run("DELETE FROM `questions` WHERE `groupId` IS NULL OR `groupId` = ''");
         } else {
-            await run("DELETE FROM questions WHERE groupId = ?", [groupId]);
+            await run("DELETE FROM `questions` WHERE `groupId` = ?", [groupId]);
         }
     },
     updateQuestionStats: async (id, deltaTotal, deltaCorrect) => {
@@ -1261,7 +1354,7 @@ module.exports = {
         const correctDelta = deltaCorrect == null ? 0 : Number(deltaCorrect);
         if (!totalDelta && !correctDelta) return;
         await run(
-            "UPDATE questions SET totalCount = COALESCE(totalCount, 0) + ?, correctCount = COALESCE(correctCount, 0) + ? WHERE id = ?",
+            "UPDATE `questions` SET `totalCount` = COALESCE(`totalCount`, 0) + ?, `correctCount` = COALESCE(`correctCount`, 0) + ? WHERE `id` = ?",
             [totalDelta, correctDelta, id]
         );
     },
@@ -1286,13 +1379,13 @@ module.exports = {
         return rows.map(normalizePaper);
     },
     getPaperById: async (id) => {
-        const rows = await query("SELECT * FROM papers WHERE id = ?", [id]);
+        const rows = await query("SELECT * FROM `papers` WHERE id = ?", [id]);
         if (rows.length === 0) return null;
         return normalizePaper(rows[0]);
     },
     addPaper: async (paper) => {
         const id = paper.id || generateId('p_');
-        await run("INSERT INTO papers (id, name, questions, rules, createDate, targetGroups, targetUsers, startTime, deadline, groupId, creatorId, shuffleQuestions, shuffleOptions, passScore) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO `papers` (`id`, `name`, `questions`, `rules`, `createDate`, `targetGroups`, `targetUsers`, `startTime`, `deadline`, `groupId`, `creatorId`, `shuffleQuestions`, `shuffleOptions`, `passScore`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
                 paper.createDate || new Date().toISOString(),
                 JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
@@ -1302,57 +1395,57 @@ module.exports = {
         return { id, ...paper };
     },
     updatePaper: async (paper) => {
-        await run("UPDATE papers SET name=?, questions=?, rules=?, targetGroups=?, targetUsers=?, startTime=?, deadline=?, groupId=?, creatorId=?, published=?, publishDate=?, createDate=?, shuffleQuestions=?, shuffleOptions=?, passScore=? WHERE id=?",
+        await run("UPDATE `papers` SET `name`=?, `questions`=?, `rules`=?, `targetGroups`=?, `targetUsers`=?, `startTime`=?, `deadline`=?, `groupId`=?, `creatorId`=?, `published`=?, `publishDate`=?, `createDate`=?, `shuffleQuestions`=?, `shuffleOptions`=?, `passScore`=? WHERE `id`=?",
             [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
             JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
-            paper.startTime || null, paper.deadline || null, paper.groupId || null, paper.creatorId || null, 
+            paper.startTime || null, paper.deadline || null, paper.groupId || null, paper.creatorId || null,
             paper.published ? 1 : 0, paper.publishDate || null, paper.createDate || null,
             paper.shuffleQuestions ? 1 : 0, paper.shuffleOptions ? 1 : 0,
             paper.passScore == null ? 0 : Number(paper.passScore), paper.id]);
         return paper;
     },
     deletePaper: async (id) => {
-        await run("DELETE FROM papers WHERE id = ?", [id]);
+        await run("DELETE FROM `papers` WHERE `id` = ?", [id]);
     },
     deleteRecordsByPaper: async (paperId) => {
-        await run("DELETE FROM records WHERE paperId = ?", [paperId]);
+        await run("DELETE FROM `records` WHERE `paperId` = ?", [paperId]);
     },
 
     // ==================== 记录相关 ====================
     getRecords: async () => {
-        const rows = await query("SELECT * FROM records");
+        const rows = await query("SELECT * FROM `records`");
         return rows.map(normalizeRecord);
     },
     getRecordsByPaper: async (paperId) => {
-        const rows = await query("SELECT * FROM records WHERE paperId = ?", [paperId]);
+        const rows = await query("SELECT * FROM `records` WHERE paperId = ?", [paperId]);
         return rows.map(normalizeRecord);
     },
     addRecord: async (record) => {
         // 检查是否已存在记录，如果存在则更新（只保留最后一次成绩）
-        const existing = await query("SELECT id FROM records WHERE userId = ? AND paperId = ?", [record.userId, record.paperId]);
-        
+        const existing = await query("SELECT `id` FROM `records` WHERE `userId` = ? AND `paperId` = ?", [record.userId, record.paperId]);
+
         const submitDate = new Date().toISOString();
         if (existing.length > 0) {
             const id = existing[0].id;
-            await run("UPDATE records SET score = ?, totalTime = ?, answers = ?, submitDate = ? WHERE id = ?",
+            await run("UPDATE `records` SET `score` = ?, `totalTime` = ?, `answers` = ?, `submitDate` = ? WHERE `id` = ?",
                 [record.score, record.totalTime, JSON.stringify(record.answers || {}), submitDate, id]);
             return { id, ...record, submitDate };
         } else {
             const id = record.id || generateId('r_');
-            await run("INSERT INTO records (id, paperId, userId, score, totalTime, answers, submitDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            await run("INSERT INTO `records` (`id`, `paperId`, `userId`, `score`, `totalTime`, `answers`, `submitDate`) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [id, record.paperId, record.userId, record.score, record.totalTime,
                     JSON.stringify(record.answers || {}), submitDate]);
             return { id, ...record, submitDate };
         }
     },
     getRecordByUserAndPaper: async (userId, paperId) => {
-        const rows = await query("SELECT * FROM records WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        const rows = await query("SELECT * FROM `records` WHERE userId = ? AND paperId = ?", [userId, paperId]);
         return rows.length > 0 ? rows[0] : null;
     },
 
     // ==================== 考试会话相关 ====================
     getExamSession: async (userId, paperId) => {
-        const rows = await query("SELECT * FROM exam_sessions WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        const rows = await query("SELECT * FROM `exam_sessions` WHERE userId = ? AND paperId = ?", [userId, paperId]);
         if (rows.length === 0) return null;
         const session = rows[0];
         return {
@@ -1363,21 +1456,21 @@ module.exports = {
     createExamSession: async (session) => {
         const id = generateId('es_');
         const now = new Date().toISOString();
-        await run("INSERT INTO exam_sessions (id, userId, paperId, startTime, lastQuestionStartTime, answers) VALUES (?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO `exam_sessions` (`id`, `userId`, `paperId`, `startTime`, `lastQuestionStartTime`, `answers`) VALUES (?, ?, ?, ?, ?, ?)",
             [id, session.userId, session.paperId, session.startTime || now, session.lastQuestionStartTime || now, JSON.stringify(session.answers || {})]);
         return { id, ...session };
     },
     updateExamSession: async (userId, paperId, answers, lastQuestionStartTime) => {
         if (lastQuestionStartTime) {
-            await run("UPDATE exam_sessions SET answers = ?, lastQuestionStartTime = ? WHERE userId = ? AND paperId = ?",
+            await run("UPDATE `exam_sessions` SET `answers` = ?, `lastQuestionStartTime` = ? WHERE `userId` = ? AND `paperId` = ?",
                 [JSON.stringify(answers || {}), lastQuestionStartTime, userId, paperId]);
         } else {
-            await run("UPDATE exam_sessions SET answers = ? WHERE userId = ? AND paperId = ?",
+            await run("UPDATE `exam_sessions` SET `answers` = ? WHERE `userId` = ? AND `paperId` = ?",
                 [JSON.stringify(answers || {}), userId, paperId]);
         }
     },
     deleteExamSession: async (userId, paperId) => {
-        await run("DELETE FROM exam_sessions WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        await run("DELETE FROM `exam_sessions` WHERE userId = ? AND paperId = ?", [userId, paperId]);
     },
     savePushTask: async ({ paperId, targetGroups, targetUsers, startTime, deadline, pushTime }) => {
         const users = await query("SELECT id, role, groupId FROM users", []);
@@ -1411,24 +1504,24 @@ module.exports = {
         const end = deadline || null;
 
         for (const userId of assignedUserIdSet) {
-            const existing = await query("SELECT id FROM user_exams WHERE userId = ? AND paperId = ?", [userId, paperId]);
+            const existing = await query("SELECT id FROM `user_exams` WHERE userId = ? AND paperId = ?", [userId, paperId]);
             if (existing.length > 0) {
                 const existingId = existing[0].id;
-                await run("UPDATE user_exams SET assignedAt = ?, startTime = ?, deadline = ? WHERE id = ?",
+                await run("UPDATE `user_exams` SET `assignedAt` = ?, `startTime` = ?, `deadline` = ? WHERE `id` = ?",
                     [assignedAt, start, end, existingId]);
             } else {
                 const id = generateId('ue_');
-                await run("INSERT INTO user_exams (id, userId, paperId, assignedAt, startTime, deadline) VALUES (?, ?, ?, ?, ?, ?)",
+                await run("INSERT INTO `user_exams` (`id`, `userId`, `paperId`, `assignedAt`, `startTime`, `deadline`) VALUES (?, ?, ?, ?, ?, ?)",
                     [id, userId, paperId, assignedAt, start, end]);
             }
         }
     },
     getUserAssignedPapers: async (userId) => {
-        const rows = await query("SELECT * FROM user_exams WHERE userId = ?", [userId]);
+        const rows = await query("SELECT * FROM `user_exams` WHERE `userId` = ?", [userId]);
         return rows;
     },
     getUserExamAssignment: async (userId, paperId) => {
-        const rows = await query("SELECT * FROM user_exams WHERE userId = ? AND paperId = ?", [userId, paperId]);
+        const rows = await query("SELECT * FROM `user_exams` WHERE `userId` = ? AND `paperId` = ?", [userId, paperId]);
         return rows.length > 0 ? rows[0] : null;
     },
 
@@ -1436,13 +1529,13 @@ module.exports = {
     addPushLog: async (log) => {
         const id = log.id || generateId('pl_');
         const pushTime = log.pushTime || new Date().toISOString();
-        await run("INSERT INTO push_logs (id, paperId, targetGroups, targetUsers, startTime, deadline, pushDate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        await run("INSERT INTO `push_logs` (`id`, `paperId`, `targetGroups`, `targetUsers`, `startTime`, `deadline`, `pushDate`) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [id, log.paperId, JSON.stringify(log.targetGroups || []), JSON.stringify(log.targetUsers || []),
                 log.startTime || null, log.deadline || null, pushTime]);
         return { id, ...log, pushTime };
     },
     getPushLogsByPaper: async (paperId) => {
-        const rows = await query("SELECT * FROM push_logs WHERE paperId = ?", [paperId]);
+        const rows = await query("SELECT * FROM `push_logs` WHERE `paperId` = ?", [paperId]);
         return rows.map(l => ({
             ...l,
             pushTime: l.pushDate, // 兼容前端字段名
@@ -1452,22 +1545,22 @@ module.exports = {
     },
 
     // ==================== 专业分类相关 ====================
-    getCategories: async () => await query("SELECT * FROM categories"),
-    getMajors: async () => await query("SELECT * FROM categories WHERE type = 'major'"),
-    getDeviceTypes: async (majorId) => await query("SELECT * FROM categories WHERE type = 'device' AND parentId = ?", [majorId]),
+    getCategories: async () => await query("SELECT * FROM `categories`"),
+    getMajors: async () => await query("SELECT * FROM `categories` WHERE `type` = 'major'"),
+    getDeviceTypes: async (majorId) => await query("SELECT * FROM `categories` WHERE `type` = 'device' AND `parentId` = ?", [majorId]),
     addCategory: async (cat) => {
         const id = cat.id || generateId('cat_');
-        await run("INSERT INTO categories (id, name, type, parentId) VALUES (?, ?, ?, ?)",
+        await run("INSERT INTO `categories` (`id`, `name`, `type`, `parentId`) VALUES (?, ?, ?, ?)",
             [id, cat.name, cat.type, cat.parentId || null]);
         return { id, ...cat };
     },
     updateCategory: async (cat) => {
-        await run("UPDATE categories SET name=?, type=?, parentId=? WHERE id=?",
+        await run("UPDATE `categories` SET `name`=?, `type`=?, `parentId`=? WHERE `id`=?",
             [cat.name, cat.type, cat.parentId || null, cat.id]);
         return cat;
     },
     deleteCategory: async (id) => {
-        await run("DELETE FROM categories WHERE id = ? OR parentId = ?", [id, id]);
+        await run("DELETE FROM `categories` WHERE `id` = ? OR `parentId` = ?", [id, id]);
     },
 
     // ==================== 系统日志相关 ====================
@@ -1475,7 +1568,7 @@ module.exports = {
         const id = log.id || generateId('log_');
         const createdAt = new Date().toISOString();
         await run(
-            "INSERT INTO system_logs (id, action, target, targetId, userId, username, details, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO `system_logs` (`id`, `action`, `target`, `targetId`, `userId`, `username`, `details`, `ip`, `createdAt`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [id, log.action, log.target, log.targetId || null, log.userId || null, log.username || null,
                 JSON.stringify(log.details || {}), log.ip || null, createdAt]
         );
@@ -1483,18 +1576,18 @@ module.exports = {
     },
 
     getSystemLogs: async (filter = {}) => {
-        let sql = "SELECT * FROM system_logs";
+        let sql = "SELECT * FROM `system_logs` ";
         const { conditions, params } = buildSystemLogFilter(filter);
         if (conditions.length > 0) sql += " WHERE " + conditions.join(" AND ");
 
-        sql += " ORDER BY createdAt DESC";
+        sql += " ORDER BY `createdAt` DESC";
 
         if (filter.limit) {
             sql += " LIMIT ?";
-            params.push(filter.limit);
+            params.push(Number(filter.limit));
             if (filter.offset) {
                 sql += " OFFSET ?";
-                params.push(filter.offset);
+                params.push(Number(filter.offset));
             }
         }
 
@@ -1506,7 +1599,7 @@ module.exports = {
     },
 
     getSystemLogsCount: async (filter = {}) => {
-        let sql = "SELECT COUNT(*) as count FROM system_logs";
+        let sql = "SELECT COUNT(*) as count FROM `system_logs` ";
         const { conditions, params } = buildSystemLogFilter(filter);
         if (conditions.length > 0) sql += " WHERE " + conditions.join(" AND ");
 
@@ -1516,9 +1609,9 @@ module.exports = {
 
     clearSystemLogs: async (beforeDate) => {
         if (beforeDate) {
-            await run("DELETE FROM system_logs WHERE createdAt < ?", [beforeDate]);
+            await run("DELETE FROM `system_logs` WHERE `createdAt` < ?", [beforeDate]);
         } else {
-            await run("DELETE FROM system_logs");
+            await run("DELETE FROM `system_logs` ");
         }
     }
 };

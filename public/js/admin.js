@@ -87,7 +87,7 @@ async function refreshActivePage() {
         else if (currentPage === 'questions') loadQuestions();
         else if (currentPage === 'papers') { loadPaperGroups(); loadPapers(); }
         else if (currentPage === 'logs') {
-            loadSystemLogs();
+            loadSystemLogs(currentLogPage);
         }
     } finally {
         isRefreshing = false;
@@ -120,7 +120,8 @@ function initNavigation() {
                 else if (page === 'analysis') loadAdminAnalysisOptions();
                 else if (page === 'database') loadDbConfig();
                 else if (page === 'logs') {
-                    loadSystemLogs();
+                    currentLogPage = 1;
+                    loadSystemLogs(1);
                 }
                 startAutoRefresh();
             } finally {
@@ -682,10 +683,10 @@ function showEditUser(id) {
                 <div style="display: flex; gap: 24px; align-items: center; flex: 1; min-width: 200px;">
                     <div style="display: flex; gap: 8px; align-items: center; font-size: 15px;">
                         <span style="color: var(--text-muted); white-space: nowrap;">飞书ID:</span>
-                        ${user.feishuUserId ? 
-                            `<span style="font-family: monospace; color: var(--text-primary);">${escapeHtml(user.feishuUserId)}</span>` : 
-                            `<input type="text" id="user-feishu-id" class="form-input" style="height: 28px; padding: 0 8px; font-size: 13px; width: 120px;" placeholder="可选">`
-                        }
+                        ${user.feishuUserId ?
+            `<span style="font-family: monospace; color: var(--text-primary);">${escapeHtml(user.feishuUserId)}</span>` :
+            `<input type="text" id="user-feishu-id" class="form-input" style="height: 28px; padding: 0 8px; font-size: 13px; width: 120px;" placeholder="可选">`
+        }
                     </div>
                     <div style="display: flex; gap: 8px; font-size: 15px;">
                         <span style="color: var(--text-muted); white-space: nowrap;">部门ID:</span>
@@ -1985,13 +1986,13 @@ async function showPushLogs(paperId) {
                 </thead>
                 <tbody>
                     ${logs.map(log => {
-                        const startText = log.startTime ? formatFullDateTime(log.startTime) : '-';
-                        const endText = log.deadline ? formatFullDateTime(log.deadline) : '-';
-                        const examTimeText = (startText === '-' && endText === '-') ? '-' : `${startText} ~ ${endText}`;
-                        const pusherName = paper && paper.creatorId
-                            ? (users.find(u => u.id === paper.creatorId)?.username || '未知用户')
-                            : '未知用户';
-                        return `
+        const startText = log.startTime ? formatFullDateTime(log.startTime) : '-';
+        const endText = log.deadline ? formatFullDateTime(log.deadline) : '-';
+        const examTimeText = (startText === '-' && endText === '-') ? '-' : `${startText} ~ ${endText}`;
+        const pusherName = paper && paper.creatorId
+            ? (users.find(u => u.id === paper.creatorId)?.username || '未知用户')
+            : '未知用户';
+        return `
                         <tr>
                             <td style="white-space:nowrap;">
                                 <div style="display:flex;flex-direction:column;gap:4px;">
@@ -2003,7 +2004,7 @@ async function showPushLogs(paperId) {
                             <td>${getGroupNames(log.targetGroups)}</td>
                             <td>${getUserNames(log.targetUsers)}</td>
                         </tr>`;
-                    }).join('')}
+    }).join('')}
                 </tbody>
             </table>
         </div>
@@ -2045,13 +2046,13 @@ function editPaper(paperId) {
     document.getElementById('paper-editor').classList.remove('hidden');
     document.getElementById('paper-editor-title').textContent = '编辑试卷';
     document.getElementById('paper-name').value = paper.name;
-    
+
     // 回填规则
     paperRules = JSON.parse(JSON.stringify(paper.rules || []));
-    
+
     // 回填已选题目
     selectedQuestions = JSON.parse(JSON.stringify(paper.questions || {}));
-    
+
     updateRulesTable();
     rulesValidated = true;
     enableGenerateButtons();
@@ -2064,7 +2065,7 @@ function editPaper(paperId) {
     if (sqEl) sqEl.checked = !!paper.shuffleQuestions;
     if (soEl) soEl.checked = !!paper.shuffleOptions;
     if (passEl) passEl.value = paper.passScore != null ? paper.passScore : '';
-    
+
     // 滚动到编辑器
     document.getElementById('paper-editor').scrollIntoView({ behavior: 'smooth' });
 }
@@ -2287,7 +2288,7 @@ let currentSelectorMaxCount = 0;
 function showQuestionSelector(type, maxCount) {
     currentSelectorType = type;
     currentSelectorMaxCount = maxCount;
-    
+
     // 重置选题器的筛选状态
     selectorGroupFilter = 'all';
     selectorMajorFilter = 'all';
@@ -2297,7 +2298,7 @@ function showQuestionSelector(type, maxCount) {
     selectorAccuracyFilter = 'all';
 
     const typeNames = { single: '单选题', multiple: '多选题', judge: '判断题' };
-    
+
     let html = `<div class="selector-header mb-4">
         <h4 class="mb-3">选择${typeNames[type]} (最多${maxCount}题)</h4>
         <div class="filter-bar flex gap-3 flex-wrap bg-body p-3 border-radius-md" style="align-items: flex-end;">
@@ -3320,11 +3321,11 @@ async function executeExport() {
             for (const g of cachedData.groups) {
                 await exportQuestionsByGroup(g.id, g.name, zip);
             }
-            
+
             const content = await zip.generateAsync({ type: "blob" });
             const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
             const zipFileName = `全量题库备份_${timeStr}.zip`;
-            
+
             // 下载 ZIP 文件
             const link = document.createElement('a');
             link.href = URL.createObjectURL(content);
@@ -3409,7 +3410,7 @@ async function exportQuestionsByGroup(groupId, groupName, zip = null) {
     if (wb.SheetNames.length > 0) {
         const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
         const fileName = `${groupName}_${timeStr}.xlsx`;
-        
+
         if (zip) {
             const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
             zip.file(fileName, excelBuffer);
@@ -3639,7 +3640,7 @@ function proceedToImportFile() {
     const select = document.getElementById('import-group-select');
     importTargetGroupId = select.value;
     importTargetGroupName = select.options[select.selectedIndex].text;
-    
+
     closeModal();
     setTimeout(() => {
         document.getElementById('file-import').click();
@@ -4154,7 +4155,7 @@ async function switchToDb(dbType) {
 
     showConfirmModal({
         title: '切换数据库',
-        message: `确定要切换到 <strong>${dbName}</strong> 数据库吗？<br><br><span style="color:var(--danger);">注意：切换后将使用新数据库，原数据不会迁移，且需要重新登录。</span>`,
+        message: `确定要切换到 <strong>${dbName}</strong> 数据库吗？<br><br><span style="color:var(--danger);">自动初始化新库结构，并尝试迁移原数据库数据，完成后需要重新登录</span>`,
         confirmText: '确认切换',
         confirmType: 'danger',
         isHtml: true,
@@ -4445,7 +4446,13 @@ function renderSystemLogs(logs) {
             }
             if (log.details.type) parts.push('类型: ' + log.details.type);
             if (log.details.role) parts.push('角色: ' + log.details.role);
-            if (log.details.dbType) parts.push('数据库: ' + log.details.dbType);
+            if (log.details.fromDb && log.details.toDb) {
+                const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
+                parts.push(`${dbNames[log.details.fromDb] || log.details.fromDb} → ${dbNames[log.details.toDb] || log.details.toDb}`);
+            } else if (log.details.dbType) {
+                const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
+                parts.push('数据库: ' + (dbNames[log.details.dbType] || log.details.dbType));
+            }
             if (log.details.beforeDate) parts.push('清理日期: ' + formatFullDateTime(log.details.beforeDate));
             detailsStr = parts.join(', ') || '-';
         } else if (log.details !== null && log.details !== undefined) {

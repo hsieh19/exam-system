@@ -115,13 +115,13 @@ module.exports = function initRoutes(app, context) {
         }
 
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
-        if (req.user.isFirstLogin && 
-            req.user.username !== adminUsername && 
-            req.path !== '/change-password' && 
+        if (req.user.isFirstLogin &&
+            req.user.username !== adminUsername &&
+            req.path !== '/change-password' &&
             req.path !== '/currentUser') {
-            return res.status(403).json({ 
-                error: '需要修改密码', 
-                forcePasswordChange: true 
+            return res.status(403).json({
+                error: '需要修改密码',
+                forcePasswordChange: true
             });
         }
 
@@ -214,10 +214,16 @@ module.exports = function initRoutes(app, context) {
             });
         }
 
+        const fromDb = db.getActiveDbType();
         await db.switchDatabase(dbType);
-        await sessionStore.clear();
-        await logAction('切换数据库', 'database', dbType, req.user, { dbType }, getClientIp(req));
+        try { await sessionStore.clear(); } catch (_) { }
+        // 先响应客户端，再写日志。避免日志写入失败导致前端误认为切换失败
         res.json({ success: true, message: `已切换到 ${dbType} 数据库` });
+        try {
+            await logAction('切换数据库', 'database', dbType, req.user, { fromDb, toDb: dbType }, getClientIp(req));
+        } catch (logErr) {
+            console.warn('[SwitchDB] Failed to write switch log:', logErr.message);
+        }
     });
 
     app.get('/api/db/export', adminMiddleware, (req, res) => {
@@ -369,8 +375,8 @@ module.exports = function initRoutes(app, context) {
 
         // 验证新密码强度 (默认管理员跳过强度校验)
         if (req.user.username !== adminUsername && !validatePasswordStrength(newPassword)) {
-            return res.status(400).json({ 
-                error: '密码强度不足：必须包含大小写字母、数字和特殊字符，且长度不少于8位' 
+            return res.status(400).json({
+                error: '密码强度不足：必须包含大小写字母、数字和特殊字符，且长度不少于8位'
             });
         }
 
@@ -381,7 +387,7 @@ module.exports = function initRoutes(app, context) {
         }
 
         await db.changePassword(userId, newPassword);
-        
+
         const session = await sessionStore.get(req.token);
         if (session && session.user) {
             session.user.isFirstLogin = 0;
@@ -426,100 +432,100 @@ module.exports = function initRoutes(app, context) {
         }
 
         const appAccessToken = await feishuService.getAppAccessToken();
-        
+
         const feishuUser = await feishuService.getUserInfo(code, appAccessToken);
         const { open_id, user_id, name } = feishuUser;
 
-            // --- 部门同步逻辑开始 ---
-            let groupIds = [];
-            try {
-                if (user_id) {
-                    const userDetails = await feishuService.getUserDetails(user_id, appAccessToken);
-                    if (userDetails.department_ids && userDetails.department_ids.length > 0) {
-                        for (const deptId of userDetails.department_ids) {
-                            const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
-                            if (deptInfo && deptInfo.name) {
-                                const deptName = deptInfo.name;
-                                // 查找或创建分组
-                                let group = await db.getGroupByName(deptName);
-                                if (!group) {
-                                    group = await db.addGroup({ name: deptName });
-                                    await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
-                                }
-                                if (!groupIds.includes(group.id)) {
-                                    groupIds.push(group.id);
-                                }
+        // --- 部门同步逻辑开始 ---
+        let groupIds = [];
+        try {
+            if (user_id) {
+                const userDetails = await feishuService.getUserDetails(user_id, appAccessToken);
+                if (userDetails.department_ids && userDetails.department_ids.length > 0) {
+                    for (const deptId of userDetails.department_ids) {
+                        const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
+                        if (deptInfo && deptInfo.name) {
+                            const deptName = deptInfo.name;
+                            // 查找或创建分组
+                            let group = await db.getGroupByName(deptName);
+                            if (!group) {
+                                group = await db.addGroup({ name: deptName });
+                                await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
+                            }
+                            if (!groupIds.includes(group.id)) {
+                                groupIds.push(group.id);
                             }
                         }
                     }
                 }
-            } catch (deptErr) {
-                console.warn('Failed to sync Feishu department:', deptErr.message);
-                // 部门同步失败不应阻断登录流程
             }
-            const finalGroupIdStr = groupIds.length > 0 ? groupIds.join(',') : null;
-            // --- 部门同步逻辑结束 ---
+        } catch (deptErr) {
+            console.warn('Failed to sync Feishu department:', deptErr.message);
+            // 部门同步失败不应阻断登录流程
+        }
+        const finalGroupIdStr = groupIds.length > 0 ? groupIds.join(',') : null;
+        // --- 部门同步逻辑结束 ---
 
-            // 3. 在数据库中查找用户
-            let user = await db.getUserByFeishuId(user_id, open_id);
+        // 3. 在数据库中查找用户
+        let user = await db.getUserByFeishuId(user_id, open_id);
 
-            // 检查飞书登录权限
-            if (user && user.feishuEnabled === 0) {
-                await logAction('飞书登录被拦截', 'user', user.id, user, { username: user.username, reason: '飞书登录权限已关闭' }, clientIp);
-                return res.status(403).json({ error: '您的账号已被禁止通过飞书登录，请联系管理员' });
+        // 检查飞书登录权限
+        if (user && user.feishuEnabled === 0) {
+            await logAction('飞书登录被拦截', 'user', user.id, user, { username: user.username, reason: '飞书登录权限已关闭' }, clientIp);
+            return res.status(403).json({ error: '您的账号已被禁止通过飞书登录，请联系管理员' });
+        }
+
+        // 4. 如果没找到，则创建一个新用户（考生角色）
+        if (!user) {
+            const newUserId = generateId('u_fs_');
+            user = await db.addUser({
+                id: newUserId,
+                username: name || `feishu_${open_id.substring(0, 8)}`,
+                password: generateSecureToken().substring(0, 16), // 随机密码
+                role: 'student',
+                groupId: finalGroupIdStr, // 绑定同步的多个分组
+                isFirstLogin: 0,
+                feishuUserId: user_id,
+                feishuOpenId: open_id
+            });
+            await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
+        } else {
+            // 更新飞书信息
+            const needsUpdate = user.feishuUserId !== user_id ||
+                user.feishuOpenId !== open_id ||
+                user.isFirstLogin === 1 ||
+                (finalGroupIdStr && user.groupId !== finalGroupIdStr); // 同时也同步多分组变更
+
+            if (needsUpdate) {
+                user.feishuUserId = user_id;
+                user.feishuOpenId = open_id;
+                user.isFirstLogin = 0;
+                if (finalGroupIdStr) user.groupId = finalGroupIdStr;
+
+                await db.updateUser(user);
+                await logAction('飞书登录同步用户信息', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
             }
+        }
 
-            // 4. 如果没找到，则创建一个新用户（考生角色）
-            if (!user) {
-                const newUserId = generateId('u_fs_');
-                user = await db.addUser({
-                    id: newUserId,
-                    username: name || `feishu_${open_id.substring(0, 8)}`,
-                    password: generateSecureToken().substring(0, 16), // 随机密码
-                    role: 'student',
-                    groupId: finalGroupIdStr, // 绑定同步的多个分组
-                    isFirstLogin: 0,
-                    feishuUserId: user_id,
-                    feishuOpenId: open_id
-                });
-                await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
+        // 5. 生成 Session
+        const existingEntry = sessionStore.getUserTokenEntry ? await sessionStore.getUserTokenEntry(user.id) : null;
+        const existingToken = existingEntry ? existingEntry.token : await sessionStore.getUserToken(user.id);
+        if (existingToken) {
+            await sessionStore.delete(existingToken);
+            closeSseForUser(user.id);
+            const isRemote = !!(existingEntry && existingEntry.ip && existingEntry.ua && (existingEntry.ip !== clientIp || existingEntry.ua !== userAgent));
+            if (isRemote) {
+                await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
             } else {
-                // 更新飞书信息
-                const needsUpdate = user.feishuUserId !== user_id || 
-                                   user.feishuOpenId !== open_id || 
-                                   user.isFirstLogin === 1 ||
-                                   (finalGroupIdStr && user.groupId !== finalGroupIdStr); // 同时也同步多分组变更
-
-                if (needsUpdate) {
-                    user.feishuUserId = user_id;
-                    user.feishuOpenId = open_id;
-                    user.isFirstLogin = 0;
-                    if (finalGroupIdStr) user.groupId = finalGroupIdStr;
-                    
-                    await db.updateUser(user);
-                    await logAction('飞书登录同步用户信息', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
-                }
+                await logAction('账号重新登录刷新会话', 'user', user.id, user, { username: user.username }, clientIp);
             }
+        }
+        const token = generateSecureToken();
+        await sessionStore.set(token, user, SESSION_EXPIRY_MS);
+        await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS, { ip: clientIp, ua: userAgent });
 
-            // 5. 生成 Session
-            const existingEntry = sessionStore.getUserTokenEntry ? await sessionStore.getUserTokenEntry(user.id) : null;
-            const existingToken = existingEntry ? existingEntry.token : await sessionStore.getUserToken(user.id);
-            if (existingToken) {
-                await sessionStore.delete(existingToken);
-                closeSseForUser(user.id);
-                const isRemote = !!(existingEntry && existingEntry.ip && existingEntry.ua && (existingEntry.ip !== clientIp || existingEntry.ua !== userAgent));
-                if (isRemote) {
-                    await logAction('账号异地登录踢下线', 'user', user.id, user, { username: user.username }, clientIp);
-                } else {
-                    await logAction('账号重新登录刷新会话', 'user', user.id, user, { username: user.username }, clientIp);
-                }
-            }
-            const token = generateSecureToken();
-            await sessionStore.set(token, user, SESSION_EXPIRY_MS);
-            await sessionStore.setUserToken(user.id, token, SESSION_EXPIRY_MS, { ip: clientIp, ua: userAgent });
-            
-            await logAction('飞书登录成功', 'user', user.id, user, { username: user.username }, clientIp);
-            
+        await logAction('飞书登录成功', 'user', user.id, user, { username: user.username }, clientIp);
+
         res.json({ token, user, expiresIn: SESSION_EXPIRY_MS });
     });
 
@@ -646,7 +652,7 @@ module.exports = function initRoutes(app, context) {
 
     app.delete('/api/questions/all', adminMiddleware, async (req, res) => {
         const { groupId } = req.query;
-        
+
         // 权限检查
         if (req.user.role !== 'super_admin') {
             // 组管只能删除本组题库，不能删除全部或公共
@@ -670,7 +676,7 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权删除' });
         }
 
-    await db.deleteQuestion(req.params.id);
+        await db.deleteQuestion(req.params.id);
         // 记录日志
         await logAction('删除题目', 'question', req.params.id, req.user, {}, getClientIp(req));
         res.json({ success: true });
@@ -782,17 +788,17 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权修改' });
         }
 
-        const paper = { 
+        const paper = {
             ...existing,
-            ...req.body, 
+            ...req.body,
             id: req.params.id,
             createDate: existing.createDate || new Date().toISOString()
         };
-        
+
         if (req.user.role !== 'super_admin') {
             paper.groupId = req.user.groupId;
         }
-        
+
         const result = await db.updatePaper(paper);
         // 记录日志
         await logAction('更新试卷', 'paper', paper.id, req.user, { name: paper.name }, getClientIp(req));
@@ -880,7 +886,7 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权删除' });
         }
 
-    await db.deletePaper(req.params.id);
+        await db.deletePaper(req.params.id);
         // 记录日志
         await logAction('删除试卷', 'paper', req.params.id, req.user, { name: existing.name }, getClientIp(req));
         res.json({ success: true });
@@ -1338,123 +1344,123 @@ module.exports = function initRoutes(app, context) {
                     }
                 });
 
-                    const letterChars = 'ABCDEFGH';
-                    const hashString = (str) => {
-                        let hash = 0;
-                        if (!str) return hash;
-                        for (let i = 0; i < str.length; i++) {
-                            const chr = str.charCodeAt(i);
-                            hash = ((hash << 5) - hash) + chr;
-                            hash |= 0;
-                        }
-                        return hash;
-                    };
-                    const normalizeAnswerValue = (answer) => {
-                        if (!answer) {
-                            return answer;
-                        }
-                        if (Array.isArray(answer)) {
-                            return answer.slice();
-                        }
-                        if (typeof answer === 'string') {
-                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                            if (parts.length > 1) {
-                                return parts;
-                            }
-                            return answer;
+                const letterChars = 'ABCDEFGH';
+                const hashString = (str) => {
+                    let hash = 0;
+                    if (!str) return hash;
+                    for (let i = 0; i < str.length; i++) {
+                        const chr = str.charCodeAt(i);
+                        hash = ((hash << 5) - hash) + chr;
+                        hash |= 0;
+                    }
+                    return hash;
+                };
+                const normalizeAnswerValue = (answer) => {
+                    if (!answer) {
+                        return answer;
+                    }
+                    if (Array.isArray(answer)) {
+                        return answer.slice();
+                    }
+                    if (typeof answer === 'string') {
+                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                        if (parts.length > 1) {
+                            return parts;
                         }
                         return answer;
-                    };
+                    }
+                    return answer;
+                };
 
-                    const recordAnswers = record.answers || {};
+                const recordAnswers = record.answers || {};
                 for (const id of paperQuestionIds) {
                     const q = questionMap.get(id);
                     if (!q) {
                         continue;
                     }
 
-                        const rawUserAnswer = recordAnswers[id];
-                        const isEmptyAnswer = rawUserAnswer == null ||
-                            (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
-                            (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+                    const rawUserAnswer = recordAnswers[id];
+                    const isEmptyAnswer = rawUserAnswer == null ||
+                        (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                        (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
 
-                        let isCorrect = false;
-                        if (!isEmptyAnswer) {
-                            let baseOptions;
-                            if (q.type === 'judge') {
-                                baseOptions = ['正确', '错误'];
-                            } else {
-                                baseOptions = Array.isArray(q.options) ? q.options : [];
-                            }
+                    let isCorrect = false;
+                    if (!isEmptyAnswer) {
+                        let baseOptions;
+                        if (q.type === 'judge') {
+                            baseOptions = ['正确', '错误'];
+                        } else {
+                            baseOptions = Array.isArray(q.options) ? q.options : [];
+                        }
 
-                            const optionLetterMap = {};
-                            if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                                const indices = baseOptions.map((_, index) => index);
-                                indices.sort((a, b) => {
-                                    const ha = hashString(String(record.userId) + q.id + String(a));
-                                    const hb = hashString(String(record.userId) + q.id + String(b));
-                                    if (ha === hb) {
-                                        return a - b;
-                                    }
-                                    return ha - hb;
-                                });
-                                indices.forEach((origIndex, position) => {
-                                    const originalLabel = letterChars[origIndex] || '';
-                                    const label = letterChars[position] || '';
-                                    if (originalLabel && label) {
-                                        optionLetterMap[originalLabel] = label;
-                                    }
-                                });
-                            }
-
-                            const originalAnswer = normalizeAnswerValue(q.answer);
-                            const mapAnswerWithLetterMap = (answer) => {
-                                if (!answer) {
-                                    return answer;
+                        const optionLetterMap = {};
+                        if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                            const indices = baseOptions.map((_, index) => index);
+                            indices.sort((a, b) => {
+                                const ha = hashString(String(record.userId) + q.id + String(a));
+                                const hb = hashString(String(record.userId) + q.id + String(b));
+                                if (ha === hb) {
+                                    return a - b;
                                 }
-                                if (Array.isArray(answer)) {
-                                    return answer.map(value => {
+                                return ha - hb;
+                            });
+                            indices.forEach((origIndex, position) => {
+                                const originalLabel = letterChars[origIndex] || '';
+                                const label = letterChars[position] || '';
+                                if (originalLabel && label) {
+                                    optionLetterMap[originalLabel] = label;
+                                }
+                            });
+                        }
+
+                        const originalAnswer = normalizeAnswerValue(q.answer);
+                        const mapAnswerWithLetterMap = (answer) => {
+                            if (!answer) {
+                                return answer;
+                            }
+                            if (Array.isArray(answer)) {
+                                return answer.map(value => {
+                                    const mapped = optionLetterMap[value];
+                                    return mapped || value;
+                                });
+                            }
+                            if (typeof answer === 'string') {
+                                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                                if (parts.length > 1) {
+                                    return parts.map(value => {
                                         const mapped = optionLetterMap[value];
                                         return mapped || value;
                                     });
                                 }
-                                if (typeof answer === 'string') {
-                                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                                    if (parts.length > 1) {
-                                        return parts.map(value => {
-                                            const mapped = optionLetterMap[value];
-                                            return mapped || value;
-                                        });
-                                    }
-                                    const mapped = optionLetterMap[answer];
-                                    return mapped || answer;
-                                }
-                                return answer;
-                            };
+                                const mapped = optionLetterMap[answer];
+                                return mapped || answer;
+                            }
+                            return answer;
+                        };
 
-                            const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                                ? mapAnswerWithLetterMap(originalAnswer)
-                                : originalAnswer;
+                        const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                            ? mapAnswerWithLetterMap(originalAnswer)
+                            : originalAnswer;
 
-                            if (q.type === 'multiple') {
-                                const correctList = Array.isArray(correctAnswerForStudent)
-                                    ? correctAnswerForStudent.slice().sort()
-                                    : [correctAnswerForStudent];
-                                const userList = Array.isArray(rawUserAnswer)
-                                    ? rawUserAnswer.slice().sort()
-                                    : [rawUserAnswer];
-                                const hasWrong = userList.some(value => !correctList.includes(value));
-                                if (!hasWrong &&
-                                    userList.length === correctList.length &&
-                                    userList.every((value, index) => value === correctList[index])) {
-                                    isCorrect = true;
-                                }
-                            } else {
-                                if (rawUserAnswer === correctAnswerForStudent) {
-                                    isCorrect = true;
-                                }
+                        if (q.type === 'multiple') {
+                            const correctList = Array.isArray(correctAnswerForStudent)
+                                ? correctAnswerForStudent.slice().sort()
+                                : [correctAnswerForStudent];
+                            const userList = Array.isArray(rawUserAnswer)
+                                ? rawUserAnswer.slice().sort()
+                                : [rawUserAnswer];
+                            const hasWrong = userList.some(value => !correctList.includes(value));
+                            if (!hasWrong &&
+                                userList.length === correctList.length &&
+                                userList.every((value, index) => value === correctList[index])) {
+                                isCorrect = true;
+                            }
+                        } else {
+                            if (rawUserAnswer === correctAnswerForStudent) {
+                                isCorrect = true;
                             }
                         }
+                    }
 
                     const deltaCorrect = isCorrect ? 1 : 0;
                     await db.updateQuestionStats(id, 1, deltaCorrect);
@@ -1566,280 +1572,280 @@ module.exports = function initRoutes(app, context) {
             return res.json({ paperId, questions: [] });
         }
 
-            // 获取试卷中的所有题目 ID
-            const paperQuestionIds = [];
-            const questionTypes = ['single', 'multiple', 'judge'];
-            questionTypes.forEach(type => {
-                const ids = paper.questions && paper.questions[type];
-                if (Array.isArray(ids)) {
-                    paperQuestionIds.push(...ids);
-                } else if (ids) {
-                    paperQuestionIds.push(ids);
-                }
-            });
-
-            if (paperQuestionIds.length === 0) {
-                return res.json({ paperId, questions: [] });
+        // 获取试卷中的所有题目 ID
+        const paperQuestionIds = [];
+        const questionTypes = ['single', 'multiple', 'judge'];
+        questionTypes.forEach(type => {
+            const ids = paper.questions && paper.questions[type];
+            if (Array.isArray(ids)) {
+                paperQuestionIds.push(...ids);
+            } else if (ids) {
+                paperQuestionIds.push(ids);
             }
+        });
 
-            // 只获取试卷相关的题目，避免全量查询性能问题
-            const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
-            const questionMap = new Map();
-            allQuestions.forEach(q => {
-                questionMap.set(q.id, q);
-            });
-            const letterChars = 'ABCDEFGH';
-            const hashString = (str) => {
-                let hash = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const chr = str.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + chr;
-                    hash |= 0;
-                }
-                return hash;
-            };
-            const buildRulesMap = (rules) => {
-                if (Array.isArray(rules) && rules.length > 0) {
-                    const map = {};
-                    rules.forEach(rule => {
-                        if (!rule || !rule.type) {
-                            return;
-                        }
-                        map[rule.type] = {
-                            score: rule.score == null ? 0 : Number(rule.score),
-                            partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
-                            timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
-                        };
-                    });
-                    return map;
-                }
-                return {
-                    single: { score: 2, partialScore: 0, timeLimit: 15 },
-                    multiple: { score: 4, partialScore: 2, timeLimit: 30 },
-                    judge: { score: 2, partialScore: 0, timeLimit: 20 }
-                };
-            };
-            const normalizeAnswerValue = (answer) => {
-                if (!answer) {
-                    return answer;
-                }
-                if (Array.isArray(answer)) {
-                    return answer.slice();
-                }
-                if (typeof answer === 'string') {
-                    const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                    if (parts.length > 1) {
-                        return parts;
+        if (paperQuestionIds.length === 0) {
+            return res.json({ paperId, questions: [] });
+        }
+
+        // 只获取试卷相关的题目，避免全量查询性能问题
+        const allQuestions = await db.getQuestions({ ids: paperQuestionIds });
+        const questionMap = new Map();
+        allQuestions.forEach(q => {
+            questionMap.set(q.id, q);
+        });
+        const letterChars = 'ABCDEFGH';
+        const hashString = (str) => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const chr = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + chr;
+                hash |= 0;
+            }
+            return hash;
+        };
+        const buildRulesMap = (rules) => {
+            if (Array.isArray(rules) && rules.length > 0) {
+                const map = {};
+                rules.forEach(rule => {
+                    if (!rule || !rule.type) {
+                        return;
                     }
-                    return answer;
+                    map[rule.type] = {
+                        score: rule.score == null ? 0 : Number(rule.score),
+                        partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
+                        timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
+                    };
+                });
+                return map;
+            }
+            return {
+                single: { score: 2, partialScore: 0, timeLimit: 15 },
+                multiple: { score: 4, partialScore: 2, timeLimit: 30 },
+                judge: { score: 2, partialScore: 0, timeLimit: 20 }
+            };
+        };
+        const normalizeAnswerValue = (answer) => {
+            if (!answer) {
+                return answer;
+            }
+            if (Array.isArray(answer)) {
+                return answer.slice();
+            }
+            if (typeof answer === 'string') {
+                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                if (parts.length > 1) {
+                    return parts;
                 }
                 return answer;
-            };
-            const formatAnswerKey = (answer) => {
-                if (answer == null) {
+            }
+            return answer;
+        };
+        const formatAnswerKey = (answer) => {
+            if (answer == null) {
+                return '未作答';
+            }
+            if (Array.isArray(answer)) {
+                if (answer.length === 0) {
                     return '未作答';
                 }
-                if (Array.isArray(answer)) {
-                    if (answer.length === 0) {
-                        return '未作答';
-                    }
-                    const sorted = answer.slice().sort();
-                    return sorted.join(',');
+                const sorted = answer.slice().sort();
+                return sorted.join(',');
+            }
+            if (typeof answer === 'string') {
+                const trimmed = answer.trim();
+                if (!trimmed) {
+                    return '未作答';
                 }
-                if (typeof answer === 'string') {
-                    const trimmed = answer.trim();
-                    if (!trimmed) {
-                        return '未作答';
-                    }
-                    return trimmed;
+                return trimmed;
+            }
+            return String(answer);
+        };
+        const rulesMap = buildRulesMap(paper.rules || []);
+        const statsMap = new Map();
+        questionTypes.forEach(type => {
+            let ids = (paper.questions && paper.questions[type]) || [];
+            if (!Array.isArray(ids)) {
+                ids = [ids];
+            }
+            ids.forEach(id => {
+                const q = questionMap.get(id);
+                if (!q) {
+                    return;
                 }
-                return String(answer);
-            };
-            const rulesMap = buildRulesMap(paper.rules || []);
-            const statsMap = new Map();
-            questionTypes.forEach(type => {
-                let ids = (paper.questions && paper.questions[type]) || [];
-                if (!Array.isArray(ids)) {
-                    ids = [ids];
+                if (statsMap.has(id)) {
+                    return;
                 }
-                ids.forEach(id => {
-                    const q = questionMap.get(id);
-                    if (!q) {
-                        return;
-                    }
-                    if (statsMap.has(id)) {
-                        return;
-                    }
-                    const optionsForDisplay = [];
-                    if (q.type === 'judge') {
-                        optionsForDisplay.push(
-                            { label: 'A', text: '正确' },
-                            { label: 'B', text: '错误' }
-                        );
-                    } else {
-                        const baseOptions = Array.isArray(q.options) ? q.options : [];
-                        baseOptions.forEach((text, index) => {
-                            const label = letterChars[index] || '';
-                            optionsForDisplay.push({
-                                label,
-                                text
-                            });
+                const optionsForDisplay = [];
+                if (q.type === 'judge') {
+                    optionsForDisplay.push(
+                        { label: 'A', text: '正确' },
+                        { label: 'B', text: '错误' }
+                    );
+                } else {
+                    const baseOptions = Array.isArray(q.options) ? q.options : [];
+                    baseOptions.forEach((text, index) => {
+                        const label = letterChars[index] || '';
+                        optionsForDisplay.push({
+                            label,
+                            text
                         });
-                    }
-                    statsMap.set(id, {
-                        id: q.id,
-                        type: q.type,
-                        content: q.content,
-                        options: optionsForDisplay,
-                        totalCount: 0,
-                        correctCount: 0,
-                        wrongCount: 0,
-                        wrongAnswerDistribution: {}
                     });
+                }
+                statsMap.set(id, {
+                    id: q.id,
+                    type: q.type,
+                    content: q.content,
+                    options: optionsForDisplay,
+                    totalCount: 0,
+                    correctCount: 0,
+                    wrongCount: 0,
+                    wrongAnswerDistribution: {}
                 });
             });
-            if (statsMap.size === 0) {
-                return res.json({ paperId, questions: [] });
+        });
+        if (statsMap.size === 0) {
+            return res.json({ paperId, questions: [] });
+        }
+        const baseOptionsCache = new Map();
+        const getBaseOptions = (q) => {
+            const cached = baseOptionsCache.get(q.id);
+            if (cached) {
+                return cached;
             }
-            const baseOptionsCache = new Map();
-            const getBaseOptions = (q) => {
-                const cached = baseOptionsCache.get(q.id);
-                if (cached) {
-                    return cached;
+            let baseOptions;
+            if (q.type === 'judge') {
+                baseOptions = ['正确', '错误'];
+            } else {
+                baseOptions = Array.isArray(q.options) ? q.options : [];
+            }
+            baseOptionsCache.set(q.id, baseOptions);
+            return baseOptions;
+        };
+        const questionIdList = Array.from(statsMap.keys());
+        records.forEach(record => {
+            const recordAnswers = record.answers || {};
+            questionIdList.forEach(id => {
+                const q = questionMap.get(id);
+                if (!q) {
+                    return;
                 }
-                let baseOptions;
-                if (q.type === 'judge') {
-                    baseOptions = ['正确', '错误'];
-                } else {
-                    baseOptions = Array.isArray(q.options) ? q.options : [];
-                }
-                baseOptionsCache.set(q.id, baseOptions);
-                return baseOptions;
-            };
-            const questionIdList = Array.from(statsMap.keys());
-            records.forEach(record => {
-                const recordAnswers = record.answers || {};
-                questionIdList.forEach(id => {
-                    const q = questionMap.get(id);
-                    if (!q) {
-                        return;
-                    }
-                    const stats = statsMap.get(id);
-                    const baseOptions = getBaseOptions(q);
-                    const optionLetterMap = {};
-                    if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                        const indices = baseOptions.map((_, index) => index);
-                        indices.sort((a, b) => {
-                            const ha = hashString(String(record.userId) + q.id + String(a));
-                            const hb = hashString(String(record.userId) + q.id + String(b));
-                            if (ha === hb) {
-                                return a - b;
-                            }
-                            return ha - hb;
-                        });
-                        indices.forEach((origIndex, position) => {
-                            const originalLabel = letterChars[origIndex] || '';
-                            const label = letterChars[position] || '';
-                            if (originalLabel && label) {
-                                optionLetterMap[originalLabel] = label;
-                            }
-                        });
-                    }
-                    const originalAnswer = normalizeAnswerValue(q.answer);
-                    const mapAnswerWithLetterMap = (answer) => {
-                        if (!answer) {
-                            return answer;
+                const stats = statsMap.get(id);
+                const baseOptions = getBaseOptions(q);
+                const optionLetterMap = {};
+                if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
+                    const indices = baseOptions.map((_, index) => index);
+                    indices.sort((a, b) => {
+                        const ha = hashString(String(record.userId) + q.id + String(a));
+                        const hb = hashString(String(record.userId) + q.id + String(b));
+                        if (ha === hb) {
+                            return a - b;
                         }
-                        if (Array.isArray(answer)) {
-                            return answer.map(value => {
+                        return ha - hb;
+                    });
+                    indices.forEach((origIndex, position) => {
+                        const originalLabel = letterChars[origIndex] || '';
+                        const label = letterChars[position] || '';
+                        if (originalLabel && label) {
+                            optionLetterMap[originalLabel] = label;
+                        }
+                    });
+                }
+                const originalAnswer = normalizeAnswerValue(q.answer);
+                const mapAnswerWithLetterMap = (answer) => {
+                    if (!answer) {
+                        return answer;
+                    }
+                    if (Array.isArray(answer)) {
+                        return answer.map(value => {
+                            const mapped = optionLetterMap[value];
+                            return mapped || value;
+                        });
+                    }
+                    if (typeof answer === 'string') {
+                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                        if (parts.length > 1) {
+                            return parts.map(value => {
                                 const mapped = optionLetterMap[value];
                                 return mapped || value;
                             });
                         }
-                        if (typeof answer === 'string') {
-                            const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                            if (parts.length > 1) {
-                                return parts.map(value => {
-                                    const mapped = optionLetterMap[value];
-                                    return mapped || value;
-                                });
-                            }
-                            const mapped = optionLetterMap[answer];
-                            return mapped || answer;
-                        }
-                        return answer;
-                    };
-                    const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                        ? mapAnswerWithLetterMap(originalAnswer)
-                        : originalAnswer;
-                    const rawUserAnswer = recordAnswers[id];
-                    const ruleConfig = rulesMap[q.type] || {
-                        score: q.type === 'multiple' ? 4 : 2,
-                        partialScore: q.type === 'multiple' ? 2 : 0,
-                        timeLimit: null
-                    };
-                    const isEmptyAnswer = rawUserAnswer == null ||
-                        (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
-                        (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
-                    if (isEmptyAnswer) {
-                        stats.totalCount += 1;
-                        stats.wrongCount += 1;
-                        const key = formatAnswerKey(rawUserAnswer);
-                        const dist = stats.wrongAnswerDistribution;
-                        dist[key] = (dist[key] || 0) + 1;
-                        return;
+                        const mapped = optionLetterMap[answer];
+                        return mapped || answer;
                     }
-                    let isCorrect = false;
-                    if (q.type === 'multiple') {
-                        const correctList = Array.isArray(correctAnswerForStudent)
-                            ? correctAnswerForStudent.slice().sort()
-                            : [correctAnswerForStudent];
-                        const userList = Array.isArray(rawUserAnswer)
-                            ? rawUserAnswer.slice().sort()
-                            : [rawUserAnswer];
-                        const hasWrong = userList.some(value => !correctList.includes(value));
-                        if (!hasWrong) {
-                            if (userList.length === correctList.length &&
-                                userList.every((value, index) => value === correctList[index])) {
-                                isCorrect = true;
-                            } else if (userList.length < correctList.length &&
-                                userList.every(value => correctList.includes(value))) {
-                                if ((ruleConfig.partialScore || 0) > 0) {
-                                    isCorrect = false;
-                                }
-                            }
-                        }
-                    } else {
-                        if (rawUserAnswer === correctAnswerForStudent) {
-                            isCorrect = true;
-                        }
-                    }
-                    stats.totalCount += 1;
-                    if (isCorrect) {
-                        stats.correctCount += 1;
-                    } else {
-                        stats.wrongCount += 1;
-                        const key = formatAnswerKey(rawUserAnswer);
-                        const dist = stats.wrongAnswerDistribution;
-                        dist[key] = (dist[key] || 0) + 1;
-                    }
-                });
-            });
-            const questions = Array.from(statsMap.values()).map(item => {
-                const total = item.totalCount;
-                const correctRate = total === 0 ? 0 : item.correctCount / total;
-                return {
-                    id: item.id,
-                    type: item.type,
-                    content: item.content,
-                    options: item.options,
-                    totalCount: item.totalCount,
-                    correctCount: item.correctCount,
-                    wrongCount: item.wrongCount,
-                    correctRate,
-                    wrongAnswerDistribution: item.wrongAnswerDistribution
+                    return answer;
                 };
+                const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
+                    ? mapAnswerWithLetterMap(originalAnswer)
+                    : originalAnswer;
+                const rawUserAnswer = recordAnswers[id];
+                const ruleConfig = rulesMap[q.type] || {
+                    score: q.type === 'multiple' ? 4 : 2,
+                    partialScore: q.type === 'multiple' ? 2 : 0,
+                    timeLimit: null
+                };
+                const isEmptyAnswer = rawUserAnswer == null ||
+                    (Array.isArray(rawUserAnswer) && rawUserAnswer.length === 0) ||
+                    (typeof rawUserAnswer === 'string' && rawUserAnswer.trim() === '');
+                if (isEmptyAnswer) {
+                    stats.totalCount += 1;
+                    stats.wrongCount += 1;
+                    const key = formatAnswerKey(rawUserAnswer);
+                    const dist = stats.wrongAnswerDistribution;
+                    dist[key] = (dist[key] || 0) + 1;
+                    return;
+                }
+                let isCorrect = false;
+                if (q.type === 'multiple') {
+                    const correctList = Array.isArray(correctAnswerForStudent)
+                        ? correctAnswerForStudent.slice().sort()
+                        : [correctAnswerForStudent];
+                    const userList = Array.isArray(rawUserAnswer)
+                        ? rawUserAnswer.slice().sort()
+                        : [rawUserAnswer];
+                    const hasWrong = userList.some(value => !correctList.includes(value));
+                    if (!hasWrong) {
+                        if (userList.length === correctList.length &&
+                            userList.every((value, index) => value === correctList[index])) {
+                            isCorrect = true;
+                        } else if (userList.length < correctList.length &&
+                            userList.every(value => correctList.includes(value))) {
+                            if ((ruleConfig.partialScore || 0) > 0) {
+                                isCorrect = false;
+                            }
+                        }
+                    }
+                } else {
+                    if (rawUserAnswer === correctAnswerForStudent) {
+                        isCorrect = true;
+                    }
+                }
+                stats.totalCount += 1;
+                if (isCorrect) {
+                    stats.correctCount += 1;
+                } else {
+                    stats.wrongCount += 1;
+                    const key = formatAnswerKey(rawUserAnswer);
+                    const dist = stats.wrongAnswerDistribution;
+                    dist[key] = (dist[key] || 0) + 1;
+                }
             });
+        });
+        const questions = Array.from(statsMap.values()).map(item => {
+            const total = item.totalCount;
+            const correctRate = total === 0 ? 0 : item.correctCount / total;
+            return {
+                id: item.id,
+                type: item.type,
+                content: item.content,
+                options: item.options,
+                totalCount: item.totalCount,
+                correctCount: item.correctCount,
+                wrongCount: item.wrongCount,
+                correctRate,
+                wrongAnswerDistribution: item.wrongAnswerDistribution
+            };
+        });
         res.json({ paperId, questions });
     });
 
@@ -1849,114 +1855,114 @@ module.exports = function initRoutes(app, context) {
         const userId = req.user.id;
         const user = await db.getUserById(userId);
 
-            if (!user) {
-                return res.status(401).json({ error: '用户不存在' });
+        if (!user) {
+            return res.status(401).json({ error: '用户不存在' });
+        }
+
+        const paper = await db.getPaperById(paperId);
+        if (!paper || !paper.published) {
+            return res.status(404).json({ error: '试卷不存在或未发布' });
+        }
+
+        const assignment = await db.getUserExamAssignment(user.id, paper.id);
+
+        if (assignment) {
+            const now = new Date();
+            const startValue = assignment.startTime || paper.startTime || null;
+            const deadlineValue = assignment.deadline || paper.deadline || null;
+
+            if (startValue) {
+                const startTime = new Date(String(startValue).replace(' ', 'T'));
+                if (now < startTime) {
+                    return res.status(400).json({ error: '考试未开始' });
+                }
+            }
+            if (deadlineValue) {
+                const deadline = new Date(String(deadlineValue).replace(' ', 'T'));
+                if (deadline < now) {
+                    return res.status(400).json({ error: '考试已截止' });
+                }
             }
 
-            const paper = await db.getPaperById(paperId);
-            if (!paper || !paper.published) {
-                return res.status(404).json({ error: '试卷不存在或未发布' });
-            }
-
-            const assignment = await db.getUserExamAssignment(user.id, paper.id);
-
-            if (assignment) {
-                const now = new Date();
-                const startValue = assignment.startTime || paper.startTime || null;
-                const deadlineValue = assignment.deadline || paper.deadline || null;
-
-                if (startValue) {
-                    const startTime = new Date(String(startValue).replace(' ', 'T'));
-                    if (now < startTime) {
-                        return res.status(400).json({ error: '考试未开始' });
-                    }
-                }
-                if (deadlineValue) {
-                    const deadline = new Date(String(deadlineValue).replace(' ', 'T'));
-                    if (deadline < now) {
-                        return res.status(400).json({ error: '考试已截止' });
-                    }
-                }
-
-                const record = await db.getRecordByUserAndPaper(user.id, paper.id);
-                if (record) {
-                    if (assignment.assignedAt && record.submitDate) {
-                        const submitDate = new Date(record.submitDate);
-                        const assignedAt = new Date(assignment.assignedAt);
-                        if (submitDate >= assignedAt) {
-                            return res.status(400).json({ error: '您已参加过该考试' });
-                        }
-                    } else {
+            const record = await db.getRecordByUserAndPaper(user.id, paper.id);
+            if (record) {
+                if (assignment.assignedAt && record.submitDate) {
+                    const submitDate = new Date(record.submitDate);
+                    const assignedAt = new Date(assignment.assignedAt);
+                    if (submitDate >= assignedAt) {
                         return res.status(400).json({ error: '您已参加过该考试' });
                     }
+                } else {
+                    return res.status(400).json({ error: '您已参加过该考试' });
                 }
-            } else {
-                const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                    ? paper.targetGroups.includes(user.groupId)
-                    : false;
-                const inUsers = paper.targetUsers && paper.targetUsers.length > 0
-                    ? paper.targetUsers.includes(user.id)
-                    : false;
+            }
+        } else {
+            const inGroup = paper.targetGroups && paper.targetGroups.length > 0
+                ? paper.targetGroups.includes(user.groupId)
+                : false;
+            const inUsers = paper.targetUsers && paper.targetUsers.length > 0
+                ? paper.targetUsers.includes(user.id)
+                : false;
 
-                if (!inGroup && !inUsers) {
-                    return res.status(403).json({ error: '无权参加该考试' });
-                }
+            if (!inGroup && !inUsers) {
+                return res.status(403).json({ error: '无权参加该考试' });
+            }
 
-                const now = new Date();
-                if (paper.startTime) {
-                    const startTime = new Date(paper.startTime.replace(' ', 'T'));
-                    if (now < startTime) {
-                        return res.status(400).json({ error: '考试未开始' });
-                    }
+            const now = new Date();
+            if (paper.startTime) {
+                const startTime = new Date(paper.startTime.replace(' ', 'T'));
+                if (now < startTime) {
+                    return res.status(400).json({ error: '考试未开始' });
                 }
-                if (paper.deadline) {
-                    const deadline = new Date(paper.deadline.replace(' ', 'T'));
-                    if (deadline < now) {
-                        return res.status(400).json({ error: '考试已截止' });
-                    }
+            }
+            if (paper.deadline) {
+                const deadline = new Date(paper.deadline.replace(' ', 'T'));
+                if (deadline < now) {
+                    return res.status(400).json({ error: '考试已截止' });
                 }
+            }
 
-                const record = await db.getRecordByUserAndPaper(user.id, paper.id);
-                if (record) {
-                    if (paper.publishDate && record.submitDate) {
-                        const submitDate = new Date(record.submitDate);
-                        const publishDate = new Date(paper.publishDate);
-                        if (submitDate >= publishDate) {
-                            return res.status(400).json({ error: '您已参加过该考试' });
-                        }
-                    } else {
+            const record = await db.getRecordByUserAndPaper(user.id, paper.id);
+            if (record) {
+                if (paper.publishDate && record.submitDate) {
+                    const submitDate = new Date(record.submitDate);
+                    const publishDate = new Date(paper.publishDate);
+                    if (submitDate >= publishDate) {
                         return res.status(400).json({ error: '您已参加过该考试' });
                     }
+                } else {
+                    return res.status(400).json({ error: '您已参加过该考试' });
                 }
             }
+        }
 
-            // 检查或创建会话
-            let session = await db.getExamSession(user.id, paper.id);
-            if (!session) {
-                session = await db.createExamSession({
-                    userId: user.id,
-                    paperId: paper.id,
-                    startTime: new Date().toISOString(),
-                    answers: {}
+        // 检查或创建会话
+        let session = await db.getExamSession(user.id, paper.id);
+        if (!session) {
+            session = await db.createExamSession({
+                userId: user.id,
+                paperId: paper.id,
+                startTime: new Date().toISOString(),
+                answers: {}
+            });
+        }
+
+        // 组装试题列表（只返回当前试卷包含的题目）
+        const allQuestions = await db.getQuestions();
+        const qMap = new Map();
+        allQuestions.forEach(q => qMap.set(q.id, q));
+
+        const selectedQuestions = [];
+        if (paper.questions) {
+            const types = ['single', 'multiple', 'judge'];
+            types.forEach(type => {
+                const ids = paper.questions[type] || [];
+                ids.forEach(id => {
+                    const q = qMap.get(id);
+                    if (q) selectedQuestions.push(q);
                 });
-            }
-
-            // 组装试题列表（只返回当前试卷包含的题目）
-            const allQuestions = await db.getQuestions();
-            const qMap = new Map();
-            allQuestions.forEach(q => qMap.set(q.id, q));
-
-            const selectedQuestions = [];
-            if (paper.questions) {
-                const types = ['single', 'multiple', 'judge'];
-                types.forEach(type => {
-                    const ids = paper.questions[type] || [];
-                    ids.forEach(id => {
-                        const q = qMap.get(id);
-                        if (q) selectedQuestions.push(q);
-                    });
-                });
-            }
+            });
+        }
 
         res.json({
             paper: {

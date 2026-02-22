@@ -128,7 +128,7 @@ class RedisStore {
             // But we might want to return simulated expiresAt if needed, 
             // though app logic usually just checks existence for validity.
             // We'll return a future expiresAt to satisfy the interface.
-            return { user, expiresAt: Date.now() + 1000 * 60 * 60 * 24 }; 
+            return { user, expiresAt: Date.now() + 1000 * 60 * 60 * 24 };
         } catch (e) {
             console.error('Session parse error', e);
             return null;
@@ -205,7 +205,7 @@ class RedisStore {
             if (keys.length > 0) {
                 await this.client.del(keys);
             }
-        } while (cursor !== 0);
+        } while (cursor !== 0 && cursor !== '0');
 
         cursor = 0;
         do {
@@ -218,7 +218,7 @@ class RedisStore {
             if (keys.length > 0) {
                 await this.client.del(keys);
             }
-        } while (cursor !== 0);
+        } while (cursor !== 0 && cursor !== '0');
     }
 
     async destroy() {
