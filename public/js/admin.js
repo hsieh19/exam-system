@@ -3426,9 +3426,10 @@ async function executeExport() {
 // 为空模板的表头添加批注说明
 function addHeaderComments(ws, headerRow, sheetType) {
     const comments = {
-        '专业': '必填。填写系统中已存在的专业名称，例如"电力工程"。',
+        '专业': '必填。填写系统中已存在的专业名称，例如"电气"。',
         '设备类型': '必填。填写该专业下已存在的设备类型名称，例如"变压器"。',
         '题库归属': '必填。填写题库名称，公共题库请填"公共题库"。',
+        '是否必考': '选填。填“是”或“否”，默认为“否”。标记为必考的题目在组卷时会优先选入。',
         '题目': '必填。填写完整的题目内容。',
         '正确答案': sheetType === 'judge'
             ? '必填。判断题填 A（正确）或 B（错误）。'
@@ -3437,19 +3438,20 @@ function addHeaderComments(ws, headerRow, sheetType) {
                 : '必填。单选题填写选项字母，例如 A。',
         '选项A': sheetType === 'judge' ? '判断题固定为"正确"，无需修改。' : '必填。填写选项 A 的内容。',
         '选项B': sheetType === 'judge' ? '判断题固定为"错误"，无需修改。' : '必填。填写选项 B 的内容。',
-        '是否必考': '选填。填“是”或“否”，默认为“否”。标记为必考的题目在组卷时会优先选入。',
         '选项C': '选填。如有第三个选项，填写选项 C 的内容。',
         '选项D': '选填。如有第四个选项，填写选项 D 的内容。'
     };
 
-    if (!ws['!comments']) ws['!comments'] = [];
-
     headerRow.forEach((colName, colIdx) => {
-        const cellRef = XLSX.utils.encode_cell({ r: 0, c: colIdx });
         if (comments[colName]) {
-            // 使用 cell 的 c 属性来添加批注
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: colIdx });
             if (!ws[cellRef]) ws[cellRef] = { t: 's', v: colName };
-            ws[cellRef].c = [{ a: '导入说明', t: comments[colName] }];
+
+            // hidden 属性设置在批注数组上（而非单个对象上），
+            // 使 Excel 默认只显示红色小三角，鼠标悬停时才弹出批注。
+            const c = [{ t: comments[colName], a: '系统' }];
+            c.hidden = true;
+            ws[cellRef].c = c;
         }
     });
 }
