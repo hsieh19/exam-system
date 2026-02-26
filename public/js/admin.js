@@ -1132,12 +1132,14 @@ function initMustFilterDropdown() {
     updateFilterLabel('must', options);
 }
 
-// 专业筛选
+// 专业筛选（根据当前所选题库级联）
 function initMajorFilterDropdown() {
     const menu = document.getElementById('major-filter-menu');
     if (!menu) return;
 
-    const majors = cachedData.categories.filter(c => c.type === 'major');
+    // 根据当前选中的题库过滤专业
+    const groupId = currentGroupFilter === 'public' ? 'public' : (currentGroupFilter || 'all');
+    const majors = getGroupMajors(groupId);
     const options = [
         { id: 'all', name: '全部专业' },
         ...majors.map(m => ({ id: m.id, name: m.name }))
@@ -1173,7 +1175,15 @@ function updateFilterLabel(filterType, options) {
 
 // 选择筛选条件
 function selectFilter(filterType, value, name) {
-    if (filterType === 'group') currentGroupFilter = value;
+    if (filterType === 'group') {
+        currentGroupFilter = value;
+        // 级联：切换题库时重置专业和设备类型筛选
+        currentMajorFilter = 'all';
+        currentDeviceFilter = 'all';
+        updateDeviceFilterButton();
+        const majorLabel = document.getElementById('major-filter-label');
+        if (majorLabel) majorLabel.textContent = '全部专业';
+    }
     else if (filterType === 'type') currentTypeFilter = value;
     else if (filterType === 'major') {
         currentMajorFilter = value;
@@ -1300,7 +1310,9 @@ function initSelectorMajorFilterDropdown() {
     const menu = document.getElementById('selector-major-filter-menu');
     if (!menu) return;
 
-    const majors = cachedData.categories.filter(c => c.type === 'major');
+    // 根据当前选题器所选题库级联过滤专业
+    const groupId = selectorGroupFilter === 'public' ? 'public' : (selectorGroupFilter || 'all');
+    const majors = getGroupMajors(groupId);
     const options = [{ id: 'all', name: '全部专业' }, ...majors.map(m => ({ id: m.id, name: m.name }))];
 
     menu.innerHTML = options.map(opt => `
@@ -1372,7 +1384,15 @@ function initSelectorAccuracyFilterDropdown() {
 }
 
 function selectSelectorFilter(filterType, value, name) {
-    if (filterType === 'group') selectorGroupFilter = value;
+    if (filterType === 'group') {
+        selectorGroupFilter = value;
+        // 级联：切换题库时重置专业和设备类型
+        selectorMajorFilter = 'all';
+        selectorDeviceFilter = 'all';
+        updateSelectorDeviceFilterButton();
+        const majorLabel = document.getElementById('selector-major-filter-label');
+        if (majorLabel) majorLabel.textContent = '全部专业';
+    }
     else if (filterType === 'major') {
         selectorMajorFilter = value;
         selectorDeviceFilter = 'all';
