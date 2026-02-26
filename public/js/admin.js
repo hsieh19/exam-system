@@ -1132,13 +1132,12 @@ function initMustFilterDropdown() {
     updateFilterLabel('must', options);
 }
 
-// 专业筛选（根据当前所选题库级联）
-function initMajorFilterDropdown() {
-    const menu = document.getElementById('major-filter-menu');
-    if (!menu) return;
+// 专业筛选（通用渲染函数）
+function renderMajorDropdown(menuId, groupFilterValue, activeMajorValue, onclickHandler) {
+    const menu = document.getElementById(menuId);
+    if (!menu) return [];
 
-    // 根据当前选中的题库过滤专业
-    const groupId = currentGroupFilter === 'public' ? 'public' : (currentGroupFilter || 'all');
+    const groupId = groupFilterValue === 'public' ? 'public' : (groupFilterValue || 'all');
     const majors = getGroupMajors(groupId);
     const options = [
         { id: 'all', name: '全部专业' },
@@ -1146,14 +1145,70 @@ function initMajorFilterDropdown() {
     ];
 
     menu.innerHTML = options.map(opt => `
-        <div class="dropdown-item ${currentMajorFilter === opt.id ? 'active' : ''}" 
+        <div class="dropdown-item ${activeMajorValue === opt.id ? 'active' : ''}" 
              data-type="major" data-id="${opt.id}" data-name="${opt.name}"
-             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
+             onclick="safeOnclick(this, '${onclickHandler}', ['type', 'id', 'name'])"
              style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
             ${escapeHtml(opt.name)}
         </div>
     `).join('');
 
+    return options;
+}
+
+// 设备类型筛选（通用渲染函数）
+function renderDeviceDropdown(menuId, majorFilterValue, activeDeviceValue, onclickHandler) {
+    const menu = document.getElementById(menuId);
+    if (!menu) return [];
+
+    if (majorFilterValue === 'all') {
+        menu.innerHTML = '';
+        return [];
+    }
+
+    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === majorFilterValue);
+    const options = [
+        { id: 'all', name: '全部设备' },
+        ...devices.map(d => ({ id: d.id, name: d.name }))
+    ];
+
+    menu.innerHTML = options.map(opt => `
+        <div class="dropdown-item ${activeDeviceValue === opt.id ? 'active' : ''}" 
+             data-type="device" data-id="${opt.id}" data-name="${opt.name}"
+             onclick="safeOnclick(this, '${onclickHandler}', ['type', 'id', 'name'])"
+             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+            ${escapeHtml(opt.name)}
+        </div>
+    `).join('');
+
+    return options;
+}
+
+// 设备按钮状态更新（通用函数）
+function setDeviceButtonState(btnId, labelId, isMajorAll) {
+    const btn = document.getElementById(btnId);
+    const label = document.getElementById(labelId);
+    if (!btn || !label) return;
+
+    if (isMajorAll) {
+        btn.disabled = true;
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        label.textContent = '全部设备';
+    } else {
+        btn.disabled = false;
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    }
+}
+
+// —— 题库列表筛选器的封装 ——
+function initMajorFilterDropdown() {
+    const options = renderMajorDropdown('major-filter-menu', currentGroupFilter, currentMajorFilter, 'selectFilter');
     updateFilterLabel('major', options);
 }
 
@@ -1201,27 +1256,8 @@ function selectFilter(filterType, value, name) {
 
 // 更新设备类型筛选按钮状态
 function updateDeviceFilterButton() {
-    const btn = document.getElementById('btn-device-filter');
-    const label = document.getElementById('device-filter-label');
-    if (!btn || !label) return;
-
-    if (currentMajorFilter === 'all') {
-        // 禁用设备筛选
-        btn.disabled = true;
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-secondary');
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-        label.textContent = '全部设备';
-        currentDeviceFilter = 'all';
-    } else {
-        // 启用设备筛选
-        btn.disabled = false;
-        btn.classList.remove('btn-secondary');
-        btn.classList.add('btn-primary');
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-    }
+    setDeviceButtonState('btn-device-filter', 'device-filter-label', currentMajorFilter === 'all');
+    if (currentMajorFilter === 'all') currentDeviceFilter = 'all';
 }
 
 // ========== 选题器下拉菜单控制 ==========
@@ -1306,40 +1342,13 @@ function initSelectorGroupFilterDropdown() {
     `).join('');
 }
 
+// —— 选题器筛选器的封装 ——
 function initSelectorMajorFilterDropdown() {
-    const menu = document.getElementById('selector-major-filter-menu');
-    if (!menu) return;
-
-    // 根据当前选题器所选题库级联过滤专业
-    const groupId = selectorGroupFilter === 'public' ? 'public' : (selectorGroupFilter || 'all');
-    const majors = getGroupMajors(groupId);
-    const options = [{ id: 'all', name: '全部专业' }, ...majors.map(m => ({ id: m.id, name: m.name }))];
-
-    menu.innerHTML = options.map(opt => `
-        <div class="dropdown-item ${selectorMajorFilter === opt.id ? 'active' : ''}" 
-             data-type="major" data-id="${opt.id}" data-name="${opt.name}"
-             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
-             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
-            ${escapeHtml(opt.name)}
-        </div>
-    `).join('');
+    renderMajorDropdown('selector-major-filter-menu', selectorGroupFilter, selectorMajorFilter, 'selectSelectorFilter');
 }
 
 function initSelectorDeviceFilterDropdown() {
-    const menu = document.getElementById('selector-device-filter-menu');
-    if (!menu || selectorMajorFilter === 'all') return;
-
-    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === selectorMajorFilter);
-    const options = [{ id: 'all', name: '全部设备' }, ...devices.map(d => ({ id: d.id, name: d.name }))];
-
-    menu.innerHTML = options.map(opt => `
-        <div class="dropdown-item ${selectorDeviceFilter === opt.id ? 'active' : ''}" 
-             data-type="device" data-id="${opt.id}" data-name="${opt.name}"
-             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
-             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
-            ${escapeHtml(opt.name)}
-        </div>
-    `).join('');
+    renderDeviceDropdown('selector-device-filter-menu', selectorMajorFilter, selectorDeviceFilter, 'selectSelectorFilter');
 }
 
 function initSelectorMustFilterDropdown() {
@@ -1408,51 +1417,12 @@ function selectSelectorFilter(filterType, value, name) {
 }
 
 function updateSelectorDeviceFilterButton() {
-    const btn = document.getElementById('btn-selector-device-filter');
-    const label = document.getElementById('selector-device-filter-label');
-    if (!btn || !label) return;
-
-    if (selectorMajorFilter === 'all') {
-        btn.disabled = true;
-        btn.classList.replace('btn-primary', 'btn-secondary');
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-        label.textContent = '全部设备';
-    } else {
-        btn.disabled = false;
-        btn.classList.replace('btn-secondary', 'btn-primary');
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-    }
+    setDeviceButtonState('btn-selector-device-filter', 'selector-device-filter-label', selectorMajorFilter === 'all');
 }
 
-// 设备类型筛选
 function initDeviceFilterDropdown() {
-    const menu = document.getElementById('device-filter-menu');
-    if (!menu) return;
-
-    // 如果没有选择专业，不初始化
-    if (currentMajorFilter === 'all') {
-        menu.innerHTML = '';
-        return;
-    }
-
-    const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === currentMajorFilter);
-    const options = [
-        { id: 'all', name: '全部设备' },
-        ...devices.map(d => ({ id: d.id, name: d.name }))
-    ];
-
-    menu.innerHTML = options.map(opt => `
-        <div class="dropdown-item ${currentDeviceFilter === opt.id ? 'active' : ''}" 
-             data-type="device" data-id="${opt.id}" data-name="${opt.name}"
-             onclick="safeOnclick(this, 'selectFilter', ['type', 'id', 'name'])"
-             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
-            ${escapeHtml(opt.name)}
-        </div>
-    `).join('');
-
-    updateFilterLabel('device', options);
+    const options = renderDeviceDropdown('device-filter-menu', currentMajorFilter, currentDeviceFilter, 'selectFilter');
+    if (options.length) updateFilterLabel('device', options);
 }
 
 // 初始化所有筛选下拉菜单
