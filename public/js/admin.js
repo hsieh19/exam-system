@@ -3271,10 +3271,46 @@ async function showExamRecordDetail(el, recordId) {
 
 // ========== 导入导出功能 ==========
 
-// 导出弹窗中专业选择变更时，级联更新设备类型下拉框
-function onExportMajorChange() {
-    const majorId = document.getElementById('export-major-select').value;
-    const deviceSelect = document.getElementById('export-device-select');
+// 根据所选题库，从题目数据中提取该题库下实际存在的专业列表
+function getGroupMajors(groupId) {
+    let questions = cachedData.questions;
+    if (groupId === 'public') {
+        questions = questions.filter(q => !q.groupId);
+    } else if (groupId !== 'all') {
+        questions = questions.filter(q => q.groupId === groupId);
+    }
+    // 提取该范围内所有不重复的 category ID
+    const majorIds = [...new Set(questions.map(q => q.category).filter(Boolean))];
+    // 从 categories 中过滤出对应的专业
+    const allMajors = cachedData.categories.filter(c => c.type === 'major');
+    if (groupId === 'all') return allMajors;
+    return allMajors.filter(m => majorIds.includes(m.id));
+}
+
+// 通用：更新专业下拉框内容
+function updateMajorSelect(majorSelectId, deviceSelectId, groupId) {
+    const majorSelect = document.getElementById(majorSelectId);
+    const deviceSelect = document.getElementById(deviceSelectId);
+    if (!majorSelect) return;
+
+    const majors = getGroupMajors(groupId);
+    let optHtml = `<option value="all">全部专业</option>`;
+    majors.forEach(m => {
+        optHtml += `<option value="${m.id}">${escapeHtml(m.name)}</option>`;
+    });
+    majorSelect.innerHTML = optHtml;
+
+    // 重置设备类型
+    if (deviceSelect) {
+        deviceSelect.innerHTML = `<option value="all">全部设备类型</option>`;
+        deviceSelect.disabled = true;
+        deviceSelect.style.opacity = '0.5';
+    }
+}
+
+// 通用：更新设备类型下拉框内容
+function updateDeviceSelect(deviceSelectId, majorId) {
+    const deviceSelect = document.getElementById(deviceSelectId);
     if (!deviceSelect) return;
 
     if (majorId === 'all') {
@@ -3291,6 +3327,18 @@ function onExportMajorChange() {
         deviceSelect.disabled = false;
         deviceSelect.style.opacity = '1';
     }
+}
+
+// 导出弹窗：题库变更 → 级联更新专业
+function onExportGroupChange() {
+    const groupId = document.getElementById('export-group-select').value;
+    updateMajorSelect('export-major-select', 'export-device-select', groupId);
+}
+
+// 导出弹窗：专业变更 → 级联更新设备类型
+function onExportMajorChange() {
+    const majorId = document.getElementById('export-major-select').value;
+    updateDeviceSelect('export-device-select', majorId);
 }
 
 async function handleExportClick() {
@@ -3323,7 +3371,7 @@ async function handleExportClick() {
     const bodyHtml = `
         <div class="form-group">
             <label class="form-label">请选择要导出的题库</label>
-            <select id="export-group-select" class="form-input">
+            <select id="export-group-select" class="form-input" onchange="onExportGroupChange()">
                 ${groupOptionsHtml}
             </select>
         </div>
@@ -3750,26 +3798,16 @@ let importTargetMajorId = 'all';
 let importTargetDeviceId = 'all';
 let importMode = 'append'; // 'append' | 'overwrite'
 
-// 导入弹窗中专业选择变更时，级联更新设备类型下拉框
+// 导入弹窗：题库变更 → 级联更新专业
+function onImportGroupChange() {
+    const groupId = document.getElementById('import-group-select').value;
+    updateMajorSelect('import-major-select', 'import-device-select', groupId);
+}
+
+// 导入弹窗：专业变更 → 级联更新设备类型
 function onImportMajorChange() {
     const majorId = document.getElementById('import-major-select').value;
-    const deviceSelect = document.getElementById('import-device-select');
-    if (!deviceSelect) return;
-
-    if (majorId === 'all') {
-        deviceSelect.innerHTML = `<option value="all">全部设备类型</option>`;
-        deviceSelect.disabled = true;
-        deviceSelect.style.opacity = '0.5';
-    } else {
-        const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === majorId);
-        let optHtml = `<option value="all">全部设备类型</option>`;
-        devices.forEach(d => {
-            optHtml += `<option value="${d.id}">${escapeHtml(d.name)}</option>`;
-        });
-        deviceSelect.innerHTML = optHtml;
-        deviceSelect.disabled = false;
-        deviceSelect.style.opacity = '1';
-    }
+    updateDeviceSelect('import-device-select', majorId);
 }
 
 // 导入模式切换时更新警告提示
@@ -3835,7 +3873,7 @@ function handleImportClick() {
     const bodyHtml = `
         <div class="form-group">
             <label class="form-label">请选择导入的目标题库</label>
-            <select id="import-group-select" class="form-input">
+            <select id="import-group-select" class="form-input" onchange="onImportGroupChange()">
                 ${groupOptionsHtml}
             </select>
         </div>
