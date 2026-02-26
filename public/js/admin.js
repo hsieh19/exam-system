@@ -2272,9 +2272,8 @@ function showQuestionSelector(type, maxCount) {
 
     let html = `<div class="selector-header mb-4">
         <h4 class="mb-3">选择${typeNames[type]} (最多${maxCount}题)</h4>
-        <div class="filter-bar flex gap-3 flex-wrap bg-body p-3 border-radius-md" style="align-items: flex-end;">
+        <div class="filter-bar flex gap-3 flex-wrap bg-body p-3 border-radius-md" style="align-items: center;">
             <div class="filter-item">
-                <label class="form-label-sm">题库/分组</label>
                 <div class="dropdown-filter" id="selector-group-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-group-filter"
                         data-type="group" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
@@ -2290,7 +2289,6 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
-                <label class="form-label-sm">专业</label>
                 <div class="dropdown-filter" id="selector-major-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-major-filter"
                         data-type="major" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
@@ -2306,7 +2304,6 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
-                <label class="form-label-sm">设备类型</label>
                 <div class="dropdown-filter" id="selector-device-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-secondary" id="btn-selector-device-filter"
                         data-type="device" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])" disabled
@@ -2322,7 +2319,6 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
-                <label class="form-label-sm">必考题</label>
                 <div class="dropdown-filter" id="selector-must-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-must-filter"
                         data-type="must" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
@@ -2330,7 +2326,7 @@ function showQuestionSelector(type, maxCount) {
                         <span id="selector-must-filter-label">全部题目</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
+                        </svg>
                     </button>
                     <div class="dropdown-menu" id="selector-must-filter-menu"
                         style="display:none;position:absolute;top:100%;left:0;margin-top:4px;min-width:160px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;max-height:300px;overflow-y:auto;">
@@ -2338,7 +2334,6 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
-                <label class="form-label-sm">正确率</label>
                 <div class="dropdown-filter" id="selector-accuracy-filter-dropdown" style="position:relative;">
                     <button class="btn btn-sm btn-primary" id="btn-selector-accuracy-filter"
                         data-type="accuracy" onclick="safeOnclick(this, 'toggleSelectorFilterDropdown', ['type'])"
@@ -2354,7 +2349,6 @@ function showQuestionSelector(type, maxCount) {
                 </div>
             </div>
             <div class="filter-item">
-                <label class="form-label-sm">关键词</label>
                 <input type="text" class="form-input-sm" id="selector-filter-keyword" 
                     placeholder="搜索题目内容..." 
                     style="height:32px;padding:4px 12px;"
