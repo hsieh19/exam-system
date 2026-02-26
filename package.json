@@ -1,6 +1,6 @@
 {
   "name": "exam-system",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "南区运维考试系统",
   "main": "src/server.js",
   "scripts": {
