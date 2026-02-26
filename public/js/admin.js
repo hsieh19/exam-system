@@ -3270,34 +3270,79 @@ async function showExamRecordDetail(el, recordId) {
 
 
 // ========== 导入导出功能 ==========
+
+// 导出弹窗中专业选择变更时，级联更新设备类型下拉框
+function onExportMajorChange() {
+    const majorId = document.getElementById('export-major-select').value;
+    const deviceSelect = document.getElementById('export-device-select');
+    if (!deviceSelect) return;
+
+    if (majorId === 'all') {
+        deviceSelect.innerHTML = `<option value="all">全部设备类型</option>`;
+        deviceSelect.disabled = true;
+        deviceSelect.style.opacity = '0.5';
+    } else {
+        const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === majorId);
+        let optHtml = `<option value="all">全部设备类型</option>`;
+        devices.forEach(d => {
+            optHtml += `<option value="${d.id}">${escapeHtml(d.name)}</option>`;
+        });
+        deviceSelect.innerHTML = optHtml;
+        deviceSelect.disabled = false;
+        deviceSelect.style.opacity = '1';
+    }
+}
+
 async function handleExportClick() {
     const user = Storage.getCurrentUser();
     const isSuper = user.role === 'super_admin';
     const groups = cachedData.groups;
 
-    let optionsHtml = '';
+    // 题库选择
+    let groupOptionsHtml = '';
     if (isSuper) {
-        optionsHtml += `<option value="all">所有题库 (每个题库独立导出)</option>`;
-        optionsHtml += `<option value="public">公共题库</option>`;
+        groupOptionsHtml += `<option value="all">所有题库 (每个题库独立导出)</option>`;
+        groupOptionsHtml += `<option value="public">公共题库</option>`;
         groups.forEach(g => {
-            optionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
+            groupOptionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
         });
     } else {
         const myGroup = groups.find(g => g.id === user.groupId);
         if (myGroup) {
-            optionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
+            groupOptionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
         }
     }
+
+    // 专业选择
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+    let majorOptionsHtml = `<option value="all">全部专业</option>`;
+    majors.forEach(m => {
+        majorOptionsHtml += `<option value="${m.id}">${escapeHtml(m.name)}</option>`;
+    });
 
     const bodyHtml = `
         <div class="form-group">
             <label class="form-label">请选择要导出的题库</label>
             <select id="export-group-select" class="form-input">
-                ${optionsHtml}
+                ${groupOptionsHtml}
             </select>
         </div>
-        <div style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
-            * 导出文件将以“题库名称_时间”命名。
+        <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">专业筛选</label>
+            <select id="export-major-select" class="form-input" onchange="onExportMajorChange()">
+                ${majorOptionsHtml}
+            </select>
+        </div>
+        <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">设备类型筛选</label>
+            <select id="export-device-select" class="form-input" disabled style="opacity:0.5;">
+                <option value="all">全部设备类型</option>
+            </select>
+        </div>
+        <div style="margin-top:16px;font-size:13px;color:var(--text-secondary);line-height:1.6;">
+            * 选择"全部专业"或"全部设备类型"时将导出该范围下的所有题目。<br>
+            * 导出文件将以"题库名_专业_设备_时间"格式命名，便于归档管理。<br>
+            * 若导出结果为空，文件中仍保留标准表头与填写说明，可直接用于导入模板。
         </div>
     `;
 
@@ -3307,35 +3352,67 @@ async function handleExportClick() {
     `);
 }
 
+// 生成规范化的时间戳字符串：YYYYMMDD_HHmmss
+function formatExportTimestamp() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+// 构建导出文件名
+function buildExportFileName(groupName, majorName, deviceName) {
+    const timeStr = formatExportTimestamp();
+    let parts = [groupName];
+    if (majorName && majorName !== '全部专业') parts.push(majorName);
+    if (deviceName && deviceName !== '全部设备类型') parts.push(deviceName);
+    parts.push(timeStr);
+    // 清理文件名中的非法字符
+    return parts.join('_').replace(/[\\/:*?"<>|]/g, '_') + '.xlsx';
+}
+
 async function executeExport() {
     const groupId = document.getElementById('export-group-select').value;
+    const majorId = document.getElementById('export-major-select').value;
+    const deviceId = document.getElementById('export-device-select').value;
+
+    const majorSelect = document.getElementById('export-major-select');
+    const deviceSelect = document.getElementById('export-device-select');
+    const majorName = majorSelect.options[majorSelect.selectedIndex].text;
+    const deviceName = deviceSelect.options[deviceSelect.selectedIndex].text;
+
     const btn = document.querySelector('#modal-footer .btn-primary');
     btn.disabled = true;
     btn.textContent = '导出中...';
+
+    const filterOpts = { majorId, deviceId, majorName, deviceName };
 
     try {
         if (groupId === 'all') {
             const zip = new JSZip();
             // 导出所有，包括公共和每个分组
-            await exportQuestionsByGroup('public', '公共题库', zip);
+            await exportQuestionsByGroup('public', '公共题库', filterOpts, zip);
             for (const g of cachedData.groups) {
-                await exportQuestionsByGroup(g.id, g.name, zip);
+                await exportQuestionsByGroup(g.id, g.name, filterOpts, zip);
             }
 
             const content = await zip.generateAsync({ type: "blob" });
-            const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
-            const zipFileName = `全量题库备份_${timeStr}.zip`;
+            const timeStr = formatExportTimestamp();
+            let zipName = '全量题库备份';
+            if (majorName !== '全部专业') zipName += '_' + majorName;
+            if (deviceName !== '全部设备类型') zipName += '_' + deviceName;
+            zipName += '_' + timeStr + '.zip';
+            zipName = zipName.replace(/[\\/:*?"<>|]/g, '_');
 
             // 下载 ZIP 文件
             const link = document.createElement('a');
             link.href = URL.createObjectURL(content);
-            link.download = zipFileName;
+            link.download = zipName;
             link.click();
         } else if (groupId === 'public') {
-            await exportQuestionsByGroup('public', '公共题库');
+            await exportQuestionsByGroup('public', '公共题库', filterOpts);
         } else {
             const g = cachedData.groups.find(group => group.id === groupId);
-            await exportQuestionsByGroup(groupId, g ? g.name : '未知题库');
+            await exportQuestionsByGroup(groupId, g ? g.name : '未知题库', filterOpts);
         }
         closeModal();
     } catch (e) {
@@ -3346,12 +3423,54 @@ async function executeExport() {
     }
 }
 
-async function exportQuestionsByGroup(groupId, groupName, zip = null) {
+// 为空模板的表头添加批注说明
+function addHeaderComments(ws, headerRow, sheetType) {
+    const comments = {
+        '专业': '必填。填写系统中已存在的专业名称，例如"电力工程"。',
+        '设备类型': '必填。填写该专业下已存在的设备类型名称，例如"变压器"。',
+        '题库归属': '必填。填写题库名称，公共题库请填"公共题库"。',
+        '题目': '必填。填写完整的题目内容。',
+        '正确答案': sheetType === 'judge'
+            ? '必填。判断题填 A（正确）或 B（错误）。'
+            : sheetType === 'multiple'
+                ? '必填。多选题用英文逗号分隔，例如 A,B,D。'
+                : '必填。单选题填写选项字母，例如 A。',
+        '选项A': sheetType === 'judge' ? '判断题固定为"正确"，无需修改。' : '必填。填写选项 A 的内容。',
+        '选项B': sheetType === 'judge' ? '判断题固定为"错误"，无需修改。' : '必填。填写选项 B 的内容。',
+        '是否必考': '选填。填“是”或“否”，默认为“否”。标记为必考的题目在组卷时会优先选入。',
+        '选项C': '选填。如有第三个选项，填写选项 C 的内容。',
+        '选项D': '选填。如有第四个选项，填写选项 D 的内容。'
+    };
+
+    if (!ws['!comments']) ws['!comments'] = [];
+
+    headerRow.forEach((colName, colIdx) => {
+        const cellRef = XLSX.utils.encode_cell({ r: 0, c: colIdx });
+        if (comments[colName]) {
+            // 使用 cell 的 c 属性来添加批注
+            if (!ws[cellRef]) ws[cellRef] = { t: 's', v: colName };
+            ws[cellRef].c = [{ a: '导入说明', t: comments[colName] }];
+        }
+    });
+}
+
+async function exportQuestionsByGroup(groupId, groupName, filterOpts = {}, zip = null) {
+    const { majorId = 'all', deviceId = 'all', majorName = '全部专业', deviceName = '全部设备类型' } = filterOpts;
+
     let questions = cachedData.questions;
+    // 按题库筛选
     if (groupId === 'public') {
         questions = questions.filter(q => !q.groupId);
     } else {
         questions = questions.filter(q => q.groupId === groupId);
+    }
+    // 按专业筛选
+    if (majorId !== 'all') {
+        questions = questions.filter(q => q.category === majorId);
+    }
+    // 按设备类型筛选
+    if (deviceId !== 'all') {
+        questions = questions.filter(q => q.deviceType === deviceId);
     }
 
     const types = { 'single': '单选题', 'multiple': '多选题', 'judge': '判断题' };
@@ -3366,6 +3485,7 @@ async function exportQuestionsByGroup(groupId, groupName, zip = null) {
                 '专业': getCatName(q.category),
                 '设备类型': getCatName(q.deviceType),
                 '题库归属': groupName,
+                '是否必考': q.must ? '是' : '否',
                 '题目': q.content,
                 '正确答案': Array.isArray(q.answer) ? q.answer.join(',') :
                     (type === 'judge' ? (q.answer === 'true' ? 'A' : 'B') : q.answer)
@@ -3390,7 +3510,7 @@ async function exportQuestionsByGroup(groupId, groupName, zip = null) {
                 });
             }
 
-            const header = ['专业', '设备类型', '题库归属', '题目', '正确答案'];
+            const header = ['专业', '设备类型', '题库归属', '是否必考', '题目', '正确答案'];
             for (let i = 0; i < maxOptions; i++) {
                 header.push('选项' + String.fromCharCode(65 + i));
             }
@@ -3398,18 +3518,19 @@ async function exportQuestionsByGroup(groupId, groupName, zip = null) {
             const ws = XLSX.utils.json_to_sheet(data, { header });
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         } else {
-            const emptyHeader = ['专业', '设备类型', '题库归属', '题目', '正确答案', '选项A', '选项B'];
+            // 空模板：保留标准表头并添加批注说明
+            const emptyHeader = ['专业', '设备类型', '题库归属', '是否必考', '题目', '正确答案', '选项A', '选项B'];
             if (type !== 'judge') {
                 emptyHeader.push('选项C', '选项D');
             }
             const ws = XLSX.utils.json_to_sheet([], { header: emptyHeader });
+            addHeaderComments(ws, emptyHeader, type);
             XLSX.utils.book_append_sheet(wb, ws, typeName);
         }
     });
 
     if (wb.SheetNames.length > 0) {
-        const timeStr = new Date().toISOString().replace(/[:T]/g, '_').split('.')[0];
-        const fileName = `${groupName}_${timeStr}.xlsx`;
+        const fileName = buildExportFileName(groupName, majorName, deviceName);
 
         if (zip) {
             const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -3444,7 +3565,6 @@ async function importQuestions(input) {
                 }
 
                 const ws = wb.Sheets[sheetName];
-                // header:1 returns array of arrays
                 const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
                 if (rows.length < 2) continue;
 
@@ -3453,6 +3573,7 @@ async function importQuestions(input) {
                 const idxCategory = getColIdx('专业');
                 const idxDeviceType = getColIdx('设备类型');
                 const idxGroup = getColIdx('题库归属');
+                const idxMust = getColIdx('是否必考');
                 const idxContent = getColIdx('题目');
                 const idxAnswer = getColIdx('正确答案');
 
@@ -3471,7 +3592,6 @@ async function importQuestions(input) {
 
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
-                    // Skip empty rows
                     if (!row || row.length === 0) continue;
 
                     const categoryRaw = row[idxCategory];
@@ -3512,6 +3632,26 @@ async function importQuestions(input) {
                         }
                     }
 
+                    // 专业筛选校验
+                    if (importTargetMajorId !== 'all') {
+                        const categoryName = String(categoryRaw).trim();
+                        const targetMajorObj = cachedData.categories.find(c => c.id === importTargetMajorId);
+                        if (targetMajorObj && categoryName !== targetMajorObj.name) {
+                            errorMsg += `工作表"${sheetName}"第${i + 1}行错误：当前选择导入专业为 "${targetMajorObj.name}"，但题目专业为 "${categoryName}"。\n`;
+                            continue;
+                        }
+                    }
+
+                    // 设备类型筛选校验
+                    if (importTargetDeviceId !== 'all') {
+                        const deviceTypeName = String(deviceTypeRaw).trim();
+                        const targetDeviceObj = cachedData.categories.find(c => c.id === importTargetDeviceId);
+                        if (targetDeviceObj && deviceTypeName !== targetDeviceObj.name) {
+                            errorMsg += `工作表"${sheetName}"第${i + 1}行错误：当前选择导入设备类型为 "${targetDeviceObj.name}"，但题目设备类型为 "${deviceTypeName}"。\n`;
+                            continue;
+                        }
+                    }
+
                     // Resolve Category ID (Strict)
                     const categoryName = String(categoryRaw).trim();
                     const majorObj = cachedData.categories.find(c => c.type === 'major' && c.name === categoryName);
@@ -3532,6 +3672,16 @@ async function importQuestions(input) {
                     }
                     const deviceTypeId = deviceObj.id;
 
+                    // Parse must field
+                    let must = 0;
+                    if (idxMust !== -1) {
+                        const mustRaw = row[idxMust];
+                        if (mustRaw !== undefined && mustRaw !== null) {
+                            const mustStr = String(mustRaw).trim();
+                            must = ['是', '1', 'true', 'yes'].includes(mustStr.toLowerCase()) ? 1 : 0;
+                        }
+                    }
+
                     let options = [];
                     if (typeAlias === 'judge') {
                         options = ['正确', '错误'];
@@ -3549,10 +3699,9 @@ async function importQuestions(input) {
                     if (typeAlias === 'multiple') {
                         answer = answer.replace(/，/g, ',').split(',').map(s => s.trim().toUpperCase());
                     } else if (typeAlias === 'judge') {
-                        // Map A/正确 -> true, B/错误 -> false
                         if (['A', '正确', 'TRUE', 'T'].includes(answer.toUpperCase())) answer = 'true';
                         else if (['B', '错误', 'FALSE', 'F'].includes(answer.toUpperCase())) answer = 'false';
-                        else answer = 'true'; // Default? Or Error. Let's default true but maybe safer to flag.
+                        else answer = 'true';
                     } else {
                         answer = answer.toUpperCase();
                     }
@@ -3564,6 +3713,7 @@ async function importQuestions(input) {
                         content: String(content).trim(),
                         options: options,
                         answer: answer,
+                        must: must,
                         groupId: rowGroupId
                     });
                 }
@@ -3582,7 +3732,7 @@ async function importQuestions(input) {
             }
 
             confirmImportQuestions(newQuestions);
-            input.value = ''; // Reset
+            input.value = '';
         } catch (e) {
             console.error(e);
             showAlert('读取文件失败，请检查文件格式');
@@ -3594,45 +3744,136 @@ async function importQuestions(input) {
 
 let importTargetGroupId = null;
 let importTargetGroupName = '';
+let importTargetMajorId = 'all';
+let importTargetDeviceId = 'all';
+let importMode = 'append'; // 'append' | 'overwrite'
+
+// 导入弹窗中专业选择变更时，级联更新设备类型下拉框
+function onImportMajorChange() {
+    const majorId = document.getElementById('import-major-select').value;
+    const deviceSelect = document.getElementById('import-device-select');
+    if (!deviceSelect) return;
+
+    if (majorId === 'all') {
+        deviceSelect.innerHTML = `<option value="all">全部设备类型</option>`;
+        deviceSelect.disabled = true;
+        deviceSelect.style.opacity = '0.5';
+    } else {
+        const devices = cachedData.categories.filter(c => c.type === 'device' && c.parentId === majorId);
+        let optHtml = `<option value="all">全部设备类型</option>`;
+        devices.forEach(d => {
+            optHtml += `<option value="${d.id}">${escapeHtml(d.name)}</option>`;
+        });
+        deviceSelect.innerHTML = optHtml;
+        deviceSelect.disabled = false;
+        deviceSelect.style.opacity = '1';
+    }
+}
+
+// 导入模式切换时更新警告提示
+function onImportModeChange() {
+    const mode = document.getElementById('import-mode-select').value;
+    const warningBox = document.getElementById('import-mode-warning');
+    if (!warningBox) return;
+
+    if (mode === 'overwrite') {
+        warningBox.style.display = 'block';
+    } else {
+        warningBox.style.display = 'none';
+    }
+}
+
+// 下载导入模板
+function downloadImportTemplate() {
+    const wb = XLSX.utils.book_new();
+    const types = { 'single': '单选题', 'multiple': '多选题', 'judge': '判断题' };
+
+    ['single', 'multiple', 'judge'].forEach(type => {
+        const typeName = types[type];
+        const emptyHeader = ['专业', '设备类型', '题库归属', '是否必考', '题目', '正确答案', '选项A', '选项B'];
+        if (type !== 'judge') {
+            emptyHeader.push('选项C', '选项D');
+        }
+        const ws = XLSX.utils.json_to_sheet([], { header: emptyHeader });
+        addHeaderComments(ws, emptyHeader, type);
+        XLSX.utils.book_append_sheet(wb, ws, typeName);
+    });
+
+    const fileName = `题库导入模板_${formatExportTimestamp()}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+}
 
 function handleImportClick() {
     const user = Storage.getCurrentUser();
     const isSuper = user.role === 'super_admin';
     const groups = cachedData.groups;
 
-    let optionsHtml = '';
+    // 题库选择
+    let groupOptionsHtml = '';
     if (isSuper) {
-        optionsHtml += `<option value="all">所有题库 (清空全部并导入)</option>`;
-        optionsHtml += `<option value="public">公共题库</option>`;
+        groupOptionsHtml += `<option value="all">所有题库 (导入到对应题库)</option>`;
+        groupOptionsHtml += `<option value="public">公共题库</option>`;
         groups.forEach(g => {
-            optionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
+            groupOptionsHtml += `<option value="${g.id}">${escapeHtml(g.name)}</option>`;
         });
     } else {
         const myGroup = groups.find(g => g.id === user.groupId);
         if (myGroup) {
-            optionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
+            groupOptionsHtml += `<option value="${myGroup.id}">${escapeHtml(myGroup.name)}</option>`;
         }
     }
+
+    // 专业选择
+    const majors = cachedData.categories.filter(c => c.type === 'major');
+    let majorOptionsHtml = `<option value="all">全部专业</option>`;
+    majors.forEach(m => {
+        majorOptionsHtml += `<option value="${m.id}">${escapeHtml(m.name)}</option>`;
+    });
 
     const bodyHtml = `
         <div class="form-group">
             <label class="form-label">请选择导入的目标题库</label>
             <select id="import-group-select" class="form-input">
-                ${optionsHtml}
+                ${groupOptionsHtml}
             </select>
         </div>
-        <div style="margin-top:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius-md);border:1px solid var(--warning);">
-            <p style="color:var(--danger);font-weight:bold;margin-bottom:8px;">⚠️ 导入提醒：</p>
+        <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">专业筛选 <span style="font-size:12px;color:var(--text-secondary);font-weight:normal;">（仅允许匹配的专业通过校验）</span></label>
+            <select id="import-major-select" class="form-input" onchange="onImportMajorChange()">
+                ${majorOptionsHtml}
+            </select>
+        </div>
+        <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">设备类型筛选</label>
+            <select id="import-device-select" class="form-input" disabled style="opacity:0.5;">
+                <option value="all">全部设备类型</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">导入模式</label>
+            <select id="import-mode-select" class="form-input" onchange="onImportModeChange()">
+                <option value="append" selected>追加模式（保留现有题目，追加新题目）</option>
+                <option value="overwrite">覆盖模式（清空现有题目后重新导入）</option>
+            </select>
+        </div>
+        <div id="import-mode-warning" style="display:none;margin-top:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius-md);border:2px solid var(--danger);">
+            <p style="color:var(--danger);font-weight:bold;margin-bottom:8px;">⚠️ 覆盖模式高危警告：</p>
             <p style="font-size:13px;line-height:1.6;">
-                导入操作会<span style="color:var(--danger);font-weight:bold;">彻底清空所选题库</span>中的现有数据。
-                建议在操作前先导出备份。
+                覆盖模式会<span style="color:var(--danger);font-weight:bold;">彻底清空所选题库</span>中的现有数据，然后重新导入。
+                此操作<span style="color:var(--danger);font-weight:bold;">不可撤销</span>！建议在操作前先导出备份。
             </p>
+        </div>
+        <div style="margin-top:16px;font-size:13px;color:var(--text-secondary);line-height:1.6;">
+            * 选择"全部专业"或"全部设备类型"时不做专业/设备类型限制。<br>
+            * 文件中的 Sheet 名称必须为：单选题、多选题、判断题。<br>
+            * 如果没有模板，请点击下方按钮下载标准导入模板。
         </div>
     `;
 
     openModal('导入题库', bodyHtml, `
+        <button class="btn btn-secondary" onclick="downloadImportTemplate()" style="margin-right:auto;">📥 下载导入模板</button>
         <button class="btn btn-secondary" onclick="closeModal()">取消</button>
-        <button class="btn btn-danger" onclick="proceedToImportFile()">确定清空并选择文件</button>
+        <button class="btn btn-primary" onclick="proceedToImportFile()">选择文件并导入</button>
     `);
 }
 
@@ -3641,33 +3882,63 @@ function proceedToImportFile() {
     importTargetGroupId = select.value;
     importTargetGroupName = select.options[select.selectedIndex].text;
 
+    const majorSelect = document.getElementById('import-major-select');
+    importTargetMajorId = majorSelect.value;
+
+    const deviceSelect = document.getElementById('import-device-select');
+    importTargetDeviceId = deviceSelect.value;
+
+    const modeSelect = document.getElementById('import-mode-select');
+    importMode = modeSelect.value;
+
     closeModal();
     setTimeout(() => {
         document.getElementById('file-import').click();
     }, 200);
 }
 
-// 替换 confirmImportQuestions
 function confirmImportQuestions(newQuestions) {
+    const isOverwrite = importMode === 'overwrite';
+
+    let messageHtml;
+    let confirmText;
+    let confirmType;
+
+    if (isOverwrite) {
+        messageHtml = `解析成功，共${newQuestions.length}道题。<br>目标题库：<strong>${importTargetGroupName}</strong><br>导入模式：<span style="color:var(--danger);font-weight:bold;">覆盖模式</span><br><br><span style="color:var(--danger);font-weight:bold;">⚠️ 警告：这将彻底清空"${importTargetGroupName}"中的现有题目，然后重新导入！此操作不可撤销！</span>`;
+        confirmText = '确认清空并导入';
+        confirmType = 'danger';
+    } else {
+        messageHtml = `解析成功，共${newQuestions.length}道题。<br>目标题库：<strong>${importTargetGroupName}</strong><br>导入模式：<span style="color:var(--success);font-weight:bold;">追加模式</span><br><br>新题目将追加到现有题库中，不会删除任何现有题目。`;
+        confirmText = '确认追加导入';
+        confirmType = 'primary';
+    }
+
     showConfirmModal({
         title: '确认导入',
-        message: `解析成功，共${newQuestions.length}道题。<br>目标题库：<strong>${importTargetGroupName}</strong><br><br><span style="color:var(--danger);font-weight:bold;">警告：这将彻底清空“${importTargetGroupName}”中的现有题目！</span>`,
-        confirmText: '确认清空并导入',
-        confirmType: 'danger',
+        message: messageHtml,
+        confirmText: confirmText,
+        confirmType: confirmType,
         isHtml: true,
         onConfirm: async () => {
             try {
-                // 1. 清空目标题库
-                await Storage.deleteAllQuestions(importTargetGroupId);
+                // 覆盖模式：先清空目标题库
+                if (isOverwrite) {
+                    await Storage.deleteAllQuestions(importTargetGroupId);
+                }
 
-                // 2. 批量添加
+                // 批量添加
                 const batchSize = 50;
                 for (let i = 0; i < newQuestions.length; i += batchSize) {
                     const batch = newQuestions.slice(i, i + batchSize);
                     await Promise.all(batch.map(q => Storage.addQuestion(q)));
                 }
 
-                showAlert(`已清空“${importTargetGroupName}”并成功导入 ${newQuestions.length} 道题目`);
+                if (isOverwrite) {
+                    showAlert(`已清空"${importTargetGroupName}"并成功导入 ${newQuestions.length} 道题目`);
+                } else {
+                    showAlert(`已成功追加导入 ${newQuestions.length} 道题目到"${importTargetGroupName}"`);
+                }
                 closeModal();
                 await refreshCache();
                 loadQuestions();
