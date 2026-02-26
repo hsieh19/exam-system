@@ -1291,25 +1291,6 @@ function toggleSelectorFilterDropdown(filterType) {
     }
 }
 
-function initSelectorMustFilterDropdown() {
-    const menu = document.getElementById('selector-must-filter-menu');
-    if (!menu) return;
-
-    const options = [
-        { id: 'all', name: '全部题目' },
-        { id: 'must', name: '仅必考题' },
-        { id: 'not_must', name: '仅非必考题' }
-    ];
-
-    menu.innerHTML = options.map(opt => `
-        <div class="dropdown-item ${selectorMustFilter === opt.id ? 'active' : ''}" 
-             data-type="must" data-id="${opt.id}" data-name="${opt.name}"
-             onclick="safeOnclick(this, 'selectSelectorFilter', ['type', 'id', 'name'])"
-             style="padding:10px 14px;cursor:pointer;font-size:13px;transition:background 0.15s;">
-            ${escapeHtml(opt.name)}
-        </div>
-    `).join('');
-}
 
 function closeSelectorFilterDropdown(e, filterType) {
     const dropdown = document.getElementById(`selector-${filterType}-filter-dropdown`);

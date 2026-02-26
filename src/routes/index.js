@@ -6,6 +6,7 @@ const { generateId } = require('../utils/id-generator');
 const { getClientIp, generateSecureToken, validatePasswordStrength } = require('../utils/common');
 const { logAction } = require('../utils/logger');
 const feishuService = require('../utils/feishu');
+const { hashString, buildRulesMap, normalizeAnswerValue, mapAnswerWithLetterMap, formatAnswerKey, getBaseOptions, buildQuestionOptions, LETTER_CHARS } = require('../utils/exam-helpers');
 
 // Session 配置
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24小时过期
@@ -1020,57 +1021,7 @@ module.exports = function initRoutes(app, context) {
             questionMap.set(q.id, q);
         });
 
-        const letterChars = 'ABCDEFGH';
-        const hashString = (str) => {
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const chr = str.charCodeAt(i);
-                hash = ((hash << 5) - hash) + chr;
-                hash |= 0;
-            }
-            return hash;
-        };
-
-        const buildRulesMap = (rules) => {
-            if (Array.isArray(rules) && rules.length > 0) {
-                const map = {};
-                rules.forEach(rule => {
-                    if (!rule || !rule.type) {
-                        return;
-                    }
-                    map[rule.type] = {
-                        score: rule.score == null ? 0 : Number(rule.score),
-                        partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
-                        timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
-                    };
-                });
-                return map;
-            }
-            return {
-                single: { score: 2, partialScore: 0, timeLimit: 15 },
-                multiple: { score: 4, partialScore: 2, timeLimit: 30 },
-                judge: { score: 2, partialScore: 0, timeLimit: 20 }
-            };
-        };
-
         const rulesMap = buildRulesMap(paper.rules || []);
-
-        const normalizeAnswerValue = (answer) => {
-            if (!answer) {
-                return answer;
-            }
-            if (Array.isArray(answer)) {
-                return answer.slice();
-            }
-            if (typeof answer === 'string') {
-                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                if (parts.length > 1) {
-                    return parts;
-                }
-                return answer;
-            }
-            return answer;
-        };
 
         const recordAnswers = record.answers || {};
         const detailedQuestions = [];
@@ -1080,84 +1031,12 @@ module.exports = function initRoutes(app, context) {
             const ids = (paper.questions && paper.questions[type]) || [];
             ids.forEach(id => {
                 const q = questionMap.get(id);
-                if (!q) {
-                    return;
-                }
+                if (!q) return;
 
-                const baseOptions = q.type === 'judge'
-                    ? ['正确', '错误']
-                    : Array.isArray(q.options) ? q.options : [];
-
-                const optionItems = [];
-                const letterMap = {};
-
-                if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                    const indices = baseOptions.map((_, index) => index);
-                    indices.sort((a, b) => {
-                        const ha = hashString(String(record.userId) + q.id + String(a));
-                        const hb = hashString(String(record.userId) + q.id + String(b));
-                        if (ha === hb) {
-                            return a - b;
-                        }
-                        return ha - hb;
-                    });
-                    indices.forEach((origIndex, position) => {
-                        const label = letterChars[position] || '';
-                        const text = baseOptions[origIndex];
-                        optionItems.push({
-                            label,
-                            text
-                        });
-                        const originalLabel = letterChars[origIndex] || '';
-                        if (originalLabel) {
-                            letterMap[originalLabel] = label;
-                        }
-                    });
-                } else {
-                    if (q.type === 'judge') {
-                        optionItems.push(
-                            { label: 'A', text: '正确' },
-                            { label: 'B', text: '错误' }
-                        );
-                    } else {
-                        baseOptions.forEach((text, index) => {
-                            const label = letterChars[index] || '';
-                            optionItems.push({
-                                label,
-                                text
-                            });
-                        });
-                    }
-                }
-
+                const { optionItems, letterMap } = buildQuestionOptions(q, record.userId, paper.shuffleOptions);
                 const originalAnswer = normalizeAnswerValue(q.answer);
-
-                const mapAnswerWithLetterMap = (answer) => {
-                    if (!answer) {
-                        return answer;
-                    }
-                    if (Array.isArray(answer)) {
-                        return answer.map(value => {
-                            const mapped = letterMap[value];
-                            return mapped || value;
-                        });
-                    }
-                    if (typeof answer === 'string') {
-                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                        if (parts.length > 1) {
-                            return parts.map(value => {
-                                const mapped = letterMap[value];
-                                return mapped || value;
-                            });
-                        }
-                        const mapped = letterMap[answer];
-                        return mapped || answer;
-                    }
-                    return answer;
-                };
-
-                const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                    ? mapAnswerWithLetterMap(originalAnswer)
+                const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && getBaseOptions(q).length > 0
+                    ? mapAnswerWithLetterMap(originalAnswer, letterMap)
                     : originalAnswer;
 
                 const rawUserAnswer = recordAnswers[id];
@@ -1344,40 +1223,10 @@ module.exports = function initRoutes(app, context) {
                     }
                 });
 
-                const letterChars = 'ABCDEFGH';
-                const hashString = (str) => {
-                    let hash = 0;
-                    if (!str) return hash;
-                    for (let i = 0; i < str.length; i++) {
-                        const chr = str.charCodeAt(i);
-                        hash = ((hash << 5) - hash) + chr;
-                        hash |= 0;
-                    }
-                    return hash;
-                };
-                const normalizeAnswerValue = (answer) => {
-                    if (!answer) {
-                        return answer;
-                    }
-                    if (Array.isArray(answer)) {
-                        return answer.slice();
-                    }
-                    if (typeof answer === 'string') {
-                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                        if (parts.length > 1) {
-                            return parts;
-                        }
-                        return answer;
-                    }
-                    return answer;
-                };
-
                 const recordAnswers = record.answers || {};
                 for (const id of paperQuestionIds) {
                     const q = questionMap.get(id);
-                    if (!q) {
-                        continue;
-                    }
+                    if (!q) continue;
 
                     const rawUserAnswer = recordAnswers[id];
                     const isEmptyAnswer = rawUserAnswer == null ||
@@ -1386,60 +1235,12 @@ module.exports = function initRoutes(app, context) {
 
                     let isCorrect = false;
                     if (!isEmptyAnswer) {
-                        let baseOptions;
-                        if (q.type === 'judge') {
-                            baseOptions = ['正确', '错误'];
-                        } else {
-                            baseOptions = Array.isArray(q.options) ? q.options : [];
-                        }
-
-                        const optionLetterMap = {};
-                        if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                            const indices = baseOptions.map((_, index) => index);
-                            indices.sort((a, b) => {
-                                const ha = hashString(String(record.userId) + q.id + String(a));
-                                const hb = hashString(String(record.userId) + q.id + String(b));
-                                if (ha === hb) {
-                                    return a - b;
-                                }
-                                return ha - hb;
-                            });
-                            indices.forEach((origIndex, position) => {
-                                const originalLabel = letterChars[origIndex] || '';
-                                const label = letterChars[position] || '';
-                                if (originalLabel && label) {
-                                    optionLetterMap[originalLabel] = label;
-                                }
-                            });
-                        }
+                        const baseOptions = getBaseOptions(q);
+                        const { letterMap } = buildQuestionOptions(q, record.userId, paper.shuffleOptions);
 
                         const originalAnswer = normalizeAnswerValue(q.answer);
-                        const mapAnswerWithLetterMap = (answer) => {
-                            if (!answer) {
-                                return answer;
-                            }
-                            if (Array.isArray(answer)) {
-                                return answer.map(value => {
-                                    const mapped = optionLetterMap[value];
-                                    return mapped || value;
-                                });
-                            }
-                            if (typeof answer === 'string') {
-                                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                                if (parts.length > 1) {
-                                    return parts.map(value => {
-                                        const mapped = optionLetterMap[value];
-                                        return mapped || value;
-                                    });
-                                }
-                                const mapped = optionLetterMap[answer];
-                                return mapped || answer;
-                            }
-                            return answer;
-                        };
-
                         const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                            ? mapAnswerWithLetterMap(originalAnswer)
+                            ? mapAnswerWithLetterMap(originalAnswer, letterMap)
                             : originalAnswer;
 
                         if (q.type === 'multiple') {
@@ -1594,109 +1395,20 @@ module.exports = function initRoutes(app, context) {
         allQuestions.forEach(q => {
             questionMap.set(q.id, q);
         });
-        const letterChars = 'ABCDEFGH';
-        const hashString = (str) => {
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const chr = str.charCodeAt(i);
-                hash = ((hash << 5) - hash) + chr;
-                hash |= 0;
-            }
-            return hash;
-        };
-        const buildRulesMap = (rules) => {
-            if (Array.isArray(rules) && rules.length > 0) {
-                const map = {};
-                rules.forEach(rule => {
-                    if (!rule || !rule.type) {
-                        return;
-                    }
-                    map[rule.type] = {
-                        score: rule.score == null ? 0 : Number(rule.score),
-                        partialScore: rule.partialScore == null ? 0 : Number(rule.partialScore),
-                        timeLimit: rule.timeLimit == null ? null : Number(rule.timeLimit)
-                    };
-                });
-                return map;
-            }
-            return {
-                single: { score: 2, partialScore: 0, timeLimit: 15 },
-                multiple: { score: 4, partialScore: 2, timeLimit: 30 },
-                judge: { score: 2, partialScore: 0, timeLimit: 20 }
-            };
-        };
-        const normalizeAnswerValue = (answer) => {
-            if (!answer) {
-                return answer;
-            }
-            if (Array.isArray(answer)) {
-                return answer.slice();
-            }
-            if (typeof answer === 'string') {
-                const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                if (parts.length > 1) {
-                    return parts;
-                }
-                return answer;
-            }
-            return answer;
-        };
-        const formatAnswerKey = (answer) => {
-            if (answer == null) {
-                return '未作答';
-            }
-            if (Array.isArray(answer)) {
-                if (answer.length === 0) {
-                    return '未作答';
-                }
-                const sorted = answer.slice().sort();
-                return sorted.join(',');
-            }
-            if (typeof answer === 'string') {
-                const trimmed = answer.trim();
-                if (!trimmed) {
-                    return '未作答';
-                }
-                return trimmed;
-            }
-            return String(answer);
-        };
         const rulesMap = buildRulesMap(paper.rules || []);
         const statsMap = new Map();
         questionTypes.forEach(type => {
             let ids = (paper.questions && paper.questions[type]) || [];
-            if (!Array.isArray(ids)) {
-                ids = [ids];
-            }
+            if (!Array.isArray(ids)) ids = [ids];
             ids.forEach(id => {
                 const q = questionMap.get(id);
-                if (!q) {
-                    return;
-                }
-                if (statsMap.has(id)) {
-                    return;
-                }
-                const optionsForDisplay = [];
-                if (q.type === 'judge') {
-                    optionsForDisplay.push(
-                        { label: 'A', text: '正确' },
-                        { label: 'B', text: '错误' }
-                    );
-                } else {
-                    const baseOptions = Array.isArray(q.options) ? q.options : [];
-                    baseOptions.forEach((text, index) => {
-                        const label = letterChars[index] || '';
-                        optionsForDisplay.push({
-                            label,
-                            text
-                        });
-                    });
-                }
+                if (!q || statsMap.has(id)) return;
+                const { optionItems } = buildQuestionOptions(q, null, false);
                 statsMap.set(id, {
                     id: q.id,
                     type: q.type,
                     content: q.content,
-                    options: optionsForDisplay,
+                    options: optionItems,
                     totalCount: 0,
                     correctCount: 0,
                     wrongCount: 0,
@@ -1707,76 +1419,18 @@ module.exports = function initRoutes(app, context) {
         if (statsMap.size === 0) {
             return res.json({ paperId, questions: [] });
         }
-        const baseOptionsCache = new Map();
-        const getBaseOptions = (q) => {
-            const cached = baseOptionsCache.get(q.id);
-            if (cached) {
-                return cached;
-            }
-            let baseOptions;
-            if (q.type === 'judge') {
-                baseOptions = ['正确', '错误'];
-            } else {
-                baseOptions = Array.isArray(q.options) ? q.options : [];
-            }
-            baseOptionsCache.set(q.id, baseOptions);
-            return baseOptions;
-        };
         const questionIdList = Array.from(statsMap.keys());
         records.forEach(record => {
             const recordAnswers = record.answers || {};
             questionIdList.forEach(id => {
                 const q = questionMap.get(id);
-                if (!q) {
-                    return;
-                }
+                if (!q) return;
                 const stats = statsMap.get(id);
                 const baseOptions = getBaseOptions(q);
-                const optionLetterMap = {};
-                if (paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0) {
-                    const indices = baseOptions.map((_, index) => index);
-                    indices.sort((a, b) => {
-                        const ha = hashString(String(record.userId) + q.id + String(a));
-                        const hb = hashString(String(record.userId) + q.id + String(b));
-                        if (ha === hb) {
-                            return a - b;
-                        }
-                        return ha - hb;
-                    });
-                    indices.forEach((origIndex, position) => {
-                        const originalLabel = letterChars[origIndex] || '';
-                        const label = letterChars[position] || '';
-                        if (originalLabel && label) {
-                            optionLetterMap[originalLabel] = label;
-                        }
-                    });
-                }
+                const { letterMap } = buildQuestionOptions(q, record.userId, paper.shuffleOptions);
                 const originalAnswer = normalizeAnswerValue(q.answer);
-                const mapAnswerWithLetterMap = (answer) => {
-                    if (!answer) {
-                        return answer;
-                    }
-                    if (Array.isArray(answer)) {
-                        return answer.map(value => {
-                            const mapped = optionLetterMap[value];
-                            return mapped || value;
-                        });
-                    }
-                    if (typeof answer === 'string') {
-                        const parts = answer.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                        if (parts.length > 1) {
-                            return parts.map(value => {
-                                const mapped = optionLetterMap[value];
-                                return mapped || value;
-                            });
-                        }
-                        const mapped = optionLetterMap[answer];
-                        return mapped || answer;
-                    }
-                    return answer;
-                };
                 const correctAnswerForStudent = paper.shuffleOptions && q.type !== 'judge' && baseOptions.length > 0
-                    ? mapAnswerWithLetterMap(originalAnswer)
+                    ? mapAnswerWithLetterMap(originalAnswer, letterMap)
                     : originalAnswer;
                 const rawUserAnswer = recordAnswers[id];
                 const ruleConfig = rulesMap[q.type] || {
