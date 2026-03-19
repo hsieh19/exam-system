@@ -9,7 +9,7 @@ let isRefreshing = false;
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.0.18', // 当前版本
+    version: '1.5.6', // 当前版本
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 
@@ -121,6 +121,7 @@ function initNavigation() {
                 else if (page === 'database') loadDbConfig();
                 else if (page === 'logs') {
                     currentLogPage = 1;
+                    initLogFilterOptions();
                     loadSystemLogs(1);
                 }
                 startAutoRefresh();
@@ -1459,7 +1460,7 @@ function loadQuestions() {
     const getGroupName = (id) => id ? (cachedData.groups.find(g => g.id === id)?.name || '未知分组') : '公共题库';
 
     const html = questions.length ? `<div class="table-container"><table class="data-table">
-    <thead><tr><th>序号</th><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>必考题</th><th>最后修改</th><th>操作</th></tr></thead>
+    <thead><tr><th>序号</th><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>必考题</th><th>最后修改时间</th><th>最后修改人</th><th>操作</th></tr></thead>
     <tbody>${questions.map((q, index) => {
         const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && q.groupId === currentUser.groupId);
         const canDelete = canEdit;
@@ -1474,6 +1475,7 @@ function loadQuestions() {
       <td><span class="badge ${q.type === 'single' ? 'badge-primary' : (q.type === 'multiple' ? 'badge-warning' : 'badge-success')}">${typeMap[q.type]}</span></td>
       <td><span class="badge ${isMust ? 'badge-success' : 'badge-transparent'}">${isMust ? '是' : '否'}</span></td>
       <td style="white-space:nowrap;">${formatFullDateTime(q.updatedAt)}</td>
+      <td>${escapeHtml(q.updatedBy || '-')}</td>
       <td>
         ${canEdit ? `<button class="btn btn-sm btn-secondary" data-id="${q.id}" onclick="safeOnclick(this, 'editQuestion', ['id'])">编辑</button>` : ''}
         ${canDelete ? `<button class="btn btn-sm btn-danger" data-id="${q.id}" onclick="safeOnclick(this, 'deleteQuestion', ['id'])">删除</button>` : ''}
@@ -1950,7 +1952,7 @@ async function showPushLogs(paperId) {
                 <thead>
                     <tr>
                         <th style="width:200px;">推送信息</th>
-                        <th>考试时间</th>
+                        <th style="width:230px;">考试时间</th>
                         <th>目标分组</th>
                         <th>目标用户</th>
                     </tr>
@@ -1959,21 +1961,25 @@ async function showPushLogs(paperId) {
                     ${logs.map(log => {
         const startText = log.startTime ? formatFullDateTime(log.startTime) : '-';
         const endText = log.deadline ? formatFullDateTime(log.deadline) : '-';
-        const examTimeText = (startText === '-' && endText === '-') ? '-' : `${startText} ~ ${endText}`;
         const pusherName = paper && paper.creatorId
             ? (users.find(u => u.id === paper.creatorId)?.username || '未知用户')
             : '未知用户';
         return `
                         <tr>
-                            <td style="white-space:nowrap;">
+                            <td style="white-space:nowrap;width:200px;">
                                 <div style="display:flex;flex-direction:column;gap:4px;">
                                     <div>推送时间：${formatFullDateTime(log.pushTime)}</div>
                                     <div>推送人：${pusherName}</div>
                                 </div>
                             </td>
-                            <td style="white-space:nowrap;">${examTimeText}</td>
-                            <td>${getGroupNames(log.targetGroups)}</td>
-                            <td>${getUserNames(log.targetUsers)}</td>
+                            <td style="white-space:nowrap;width:230px;">
+                                <div style="display:flex;flex-direction:column;gap:4px;">
+                                    <div>开始时间：${startText}</div>
+                                    <div>截止时间：${endText}</div>
+                                </div>
+                            </td>
+                            <td style="word-break:break-all;vertical-align:top;">${getGroupNames(log.targetGroups)}</td>
+                            <td style="word-break:break-all;vertical-align:top;">${getUserNames(log.targetUsers)}</td>
                         </tr>`;
     }).join('')}
                 </tbody>
@@ -4551,6 +4557,26 @@ const LOG_TARGET_ACTIONS = {
     ]
 };
 
+function initLogFilterOptions() {
+    const targetFilter = document.getElementById('log-target-filter');
+    if (!targetFilter) return;
+
+    const targets = [
+        { value: '', label: '全部对象' },
+        { value: 'user', label: '用户' },
+        { value: 'question', label: '题目' },
+        { value: 'paper', label: '试卷' },
+        { value: 'database', label: '数据库' },
+        { value: 'logs', label: '日志' }
+    ];
+
+    targetFilter.innerHTML = targets.map(t =>
+        `<option value="${t.value}">${t.label}</option>`
+    ).join('');
+
+    updateLogActionOptions();
+}
+
 function updateLogActionOptions() {
     const targetFilter = document.getElementById('log-target-filter');
     const actionFilter = document.getElementById('log-action-filter');
@@ -4715,21 +4741,49 @@ function renderSystemLogs(logs) {
             detailsStr = log.details.trim() || '-';
         } else if (log.details && typeof log.details === 'object') {
             const parts = [];
-            if (log.details.username) parts.push('用户名: ' + log.details.username);
-            if (log.details.name) {
-                const nameLabel = log.target === 'user' ? '用户名: ' : '名称: ';
-                parts.push(nameLabel + log.details.name);
+            
+            // 特殊处理题目详情
+            if (log.target === 'question') {
+                const typeMap = { single: '单选题', multiple: '多选题', judge: '判断题' };
+                if (log.details.type) parts.push('类型: ' + (typeMap[log.details.type] || log.details.type));
+                
+                if (log.details.category) {
+                    const major = cachedData.categories.find(c => c.id === log.details.category);
+                    parts.push('专业: ' + (major ? major.name : log.details.category));
+                }
+                
+                if (log.details.deviceType) {
+                    const device = cachedData.categories.find(c => c.id === log.details.deviceType);
+                    parts.push('设备类型: ' + (device ? device.name : log.details.deviceType));
+                }
+                
+                if (log.details.content) {
+                    parts.push('题目: ' + log.details.content);
+                }
+            } else {
+                // 通用详情解析
+                if (log.details.username) parts.push('用户名: ' + log.details.username);
+                if (log.details.name) {
+                    const nameLabel = log.target === 'user' ? '用户名: ' : '名称: ';
+                    parts.push(nameLabel + log.details.name);
+                }
+                if (log.details.type) {
+                    const typeLabels = { single: '单选题', multiple: '多选题', judge: '判断题' };
+                    parts.push('类型: ' + (typeLabels[log.details.type] || log.details.type));
+                }
+                if (log.details.role) {
+                    const roleLabels = { super_admin: '超级管理员', group_admin: '分组管理员', student: '考生' };
+                    parts.push('角色: ' + (roleLabels[log.details.role] || log.details.role));
+                }
+                if (log.details.fromDb && log.details.toDb) {
+                    const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
+                    parts.push(`${dbNames[log.details.fromDb] || log.details.fromDb} → ${dbNames[log.details.toDb] || log.details.toDb}`);
+                } else if (log.details.dbType) {
+                    const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
+                    parts.push('数据库: ' + (dbNames[log.details.dbType] || log.details.dbType));
+                }
+                if (log.details.beforeDate) parts.push('清理日期: ' + formatFullDateTime(log.details.beforeDate));
             }
-            if (log.details.type) parts.push('类型: ' + log.details.type);
-            if (log.details.role) parts.push('角色: ' + log.details.role);
-            if (log.details.fromDb && log.details.toDb) {
-                const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
-                parts.push(`${dbNames[log.details.fromDb] || log.details.fromDb} → ${dbNames[log.details.toDb] || log.details.toDb}`);
-            } else if (log.details.dbType) {
-                const dbNames = { sqlite: 'SQLite', mysql: 'MySQL', postgres: 'PostgreSQL' };
-                parts.push('数据库: ' + (dbNames[log.details.dbType] || log.details.dbType));
-            }
-            if (log.details.beforeDate) parts.push('清理日期: ' + formatFullDateTime(log.details.beforeDate));
             detailsStr = parts.join(', ') || '-';
         } else if (log.details !== null && log.details !== undefined) {
             detailsStr = String(log.details);

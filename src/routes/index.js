@@ -437,32 +437,30 @@ module.exports = function initRoutes(app, context) {
         const feishuUser = await feishuService.getUserInfo(code, appAccessToken);
         const { open_id, user_id, name } = feishuUser;
 
-        // --- 部门同步逻辑开始 ---
+        // --- 部门同步逻辑：方案B（反向映射） ---
         let groupIds = [];
         try {
-            if (user_id) {
-                const userDetails = await feishuService.getUserDetails(user_id, appAccessToken);
-                if (userDetails.department_ids && userDetails.department_ids.length > 0) {
-                    for (const deptId of userDetails.department_ids) {
-                        const deptInfo = await feishuService.getDepartmentInfo(deptId, appAccessToken);
-                        if (deptInfo && deptInfo.name) {
-                            const deptName = deptInfo.name;
-                            // 查找或创建分组
-                            let group = await db.getGroupByName(deptName);
-                            if (!group) {
-                                group = await db.addGroup({ name: deptName });
-                                await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
-                            }
-                            if (!groupIds.includes(group.id)) {
-                                groupIds.push(group.id);
-                            }
-                        }
-                    }
+            console.log(`[FeishuSync] Building dept map for user: ${name} (${open_id})`);
+            const deptMap = await feishuService.buildOpenIdToDeptMap(appAccessToken);
+            console.log(`[FeishuSync] Dept map built, keys: ${Object.keys(deptMap).length}. User in map: ${!!deptMap[open_id]}`);
+
+            const userDepts = deptMap[open_id] || [];
+            for (const deptName of userDepts) {
+                let group = await db.getGroupByName(deptName);
+                if (!group) {
+                    group = await db.addGroup({ name: deptName });
+                    console.log(`[FeishuSync] Auto-created group: ${deptName}`);
+                    await logAction('飞书部门自动同步分组', 'group', group.id, group, { name: deptName }, clientIp);
+                }
+                if (!groupIds.includes(group.id)) {
+                    groupIds.push(group.id);
                 }
             }
+            if (userDepts.length === 0) {
+                console.log(`[FeishuSync] User ${name} not found in any department.`);
+            }
         } catch (deptErr) {
-            console.warn('Failed to sync Feishu department:', deptErr.message);
-            // 部门同步失败不应阻断登录流程
+            console.warn('[FeishuSync] Failed (Method B):', deptErr.message);
         }
         const finalGroupIdStr = groupIds.length > 0 ? groupIds.join(',') : null;
         // --- 部门同步逻辑结束 ---
@@ -476,7 +474,16 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '您的账号已被禁止通过飞书登录，请联系管理员' });
         }
 
-        // 4. 如果没找到，则创建一个新用户（考生角色）
+        // 4. 如果没找到，则尝试通过用户名查找（解决同步失败导致的重名问题）
+        if (!user) {
+            user = await db.getUserByUsername(name);
+            if (user && user.feishuUserId) {
+                // 如果发现已绑定的飞书用户但 ID 不匹配，说明库里数据乱了。
+                console.warn(`[Login] Username ${name} occupied by different Feishu ID.`);
+                user = null; 
+            }
+        }
+
         if (!user) {
             const newUserId = generateId('u_fs_');
             user = await db.addUser({
@@ -491,16 +498,18 @@ module.exports = function initRoutes(app, context) {
             });
             await logAction('飞书自动注册', 'user', user.id, user, { username: name, open_id, groups: finalGroupIdStr }, clientIp);
         } else {
-            // 更新飞书信息
+            // 更新飞书信息与分组
             const needsUpdate = user.feishuUserId !== user_id ||
                 user.feishuOpenId !== open_id ||
                 user.isFirstLogin === 1 ||
-                (finalGroupIdStr && user.groupId !== finalGroupIdStr); // 同时也同步多分组变更
+                (finalGroupIdStr && user.groupId !== finalGroupIdStr);
 
             if (needsUpdate) {
-                user.feishuUserId = user_id;
-                user.feishuOpenId = open_id;
+                user.feishuUserId = user_id || user.feishuUserId || null;
+                user.feishuOpenId = open_id || user.feishuOpenId || null;
                 user.isFirstLogin = 0;
+                user.role = user.role || 'student';
+                user.username = user.username || name;
                 if (finalGroupIdStr) user.groupId = finalGroupIdStr;
 
                 await db.updateUser(user);
@@ -623,10 +632,15 @@ module.exports = function initRoutes(app, context) {
         if (req.user.role !== 'super_admin') {
             questionData.groupId = req.user.groupId;
         }
-        const question = { ...questionData, id: generateId('q_') };
+        const question = { ...questionData, id: generateId('q_'), updatedBy: req.user.username };
         const result = await db.addQuestion(question);
         // 记录日志
-        await logAction('创建题目', 'question', question.id, req.user, { type: questionData.type }, getClientIp(req));
+        await logAction('创建题目', 'question', question.id, req.user, { 
+            type: question.type, 
+            category: question.category, 
+            deviceType: question.deviceType, 
+            content: question.content 
+        }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'questions' });
     });
@@ -640,13 +654,18 @@ module.exports = function initRoutes(app, context) {
             return res.status(403).json({ error: '无权修改公共题库或其他分组题库' });
         }
 
-        const question = { ...req.body, id: req.params.id };
+        const question = { ...req.body, id: req.params.id, updatedBy: req.user.username };
         if (req.user.role !== 'super_admin') {
             question.groupId = req.user.groupId; // 强制保持本组
         }
         const result = await db.updateQuestion(question);
         // 记录日志
-        await logAction('更新题目', 'question', req.params.id, req.user, { type: question.type }, getClientIp(req));
+        await logAction('更新题目', 'question', req.params.id, req.user, { 
+            type: question.type, 
+            category: question.category, 
+            deviceType: question.deviceType, 
+            content: question.content 
+        }, getClientIp(req));
         res.json(result);
         broadcast('db_change', { resource: 'questions' });
     });

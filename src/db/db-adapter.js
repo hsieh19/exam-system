@@ -108,7 +108,8 @@ const sqliteAdapter = {
                 deviceType TEXT,
                 groupId TEXT,
                 must INTEGER DEFAULT 0,
-                updatedAt TEXT
+                updatedAt TEXT,
+                updatedBy TEXT
             );
             CREATE TABLE IF NOT EXISTS papers (
                 id TEXT PRIMARY KEY,
@@ -180,13 +181,27 @@ const sqliteAdapter = {
                 deadline TEXT,
                 UNIQUE(userId, paperId)
             );
+            CREATE TABLE IF NOT EXISTS system_logs_archive (
+                id TEXT PRIMARY KEY,
+                action TEXT NOT NULL,
+                target TEXT NOT NULL,
+                targetId TEXT,
+                userId TEXT,
+                username TEXT,
+                details TEXT,
+                ip TEXT,
+                createdAt TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_users_groupId ON users(groupId);
             CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions(groupId);
             CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers(groupId);
             CREATE INDEX IF NOT EXISTS idx_records_paperId ON records(paperId);
             CREATE INDEX IF NOT EXISTS idx_records_userId ON records(userId);
+            CREATE INDEX IF NOT EXISTS idx_records_paper_score ON records(paperId, score DESC, totalTime ASC);
             CREATE INDEX IF NOT EXISTS idx_user_exams_userId ON user_exams(userId);
             CREATE INDEX IF NOT EXISTS idx_user_exams_paperId ON user_exams(paperId);
+            CREATE INDEX IF NOT EXISTS idx_system_logs_createdAt ON system_logs(createdAt);
+            CREATE INDEX IF NOT EXISTS idx_system_logs_userId ON system_logs(userId);
         `;
         this.db.run(tables);
 
@@ -206,6 +221,7 @@ const sqliteAdapter = {
         };
 
         checkAndAddColumn('questions', 'updatedAt', 'TEXT');
+        checkAndAddColumn('questions', 'updatedBy', 'TEXT');
         checkAndAddColumn('questions', 'must', 'INTEGER DEFAULT 0');
         checkAndAddColumn('questions', 'correctCount', 'INTEGER DEFAULT 0');
         checkAndAddColumn('questions', 'totalCount', 'INTEGER DEFAULT 0');
@@ -343,6 +359,7 @@ const mysqlAdapter = {
                 groupId VARCHAR(255),
                 must TINYINT DEFAULT 0,
                 updatedAt VARCHAR(50),
+                updatedBy VARCHAR(255),
                 correctCount INT DEFAULT 0,
                 totalCount INT DEFAULT 0
             )`,
@@ -416,13 +433,27 @@ const mysqlAdapter = {
                 deadline VARCHAR(50),
                 UNIQUE KEY uniq_user_paper (userId, paperId)
             )`,
+            `CREATE TABLE IF NOT EXISTS system_logs_archive (
+                id VARCHAR(255) PRIMARY KEY,
+                action VARCHAR(50) NOT NULL,
+                target VARCHAR(50) NOT NULL,
+                targetId VARCHAR(255),
+                userId VARCHAR(255),
+                username VARCHAR(255),
+                details TEXT,
+                ip VARCHAR(100),
+                createdAt VARCHAR(50) NOT NULL
+            )`,
             `CREATE INDEX idx_users_groupId ON users(groupId)`,
             `CREATE INDEX idx_questions_groupId ON questions(groupId)`,
             `CREATE INDEX idx_papers_groupId ON papers(groupId)`,
             `CREATE INDEX idx_records_paperId ON records(paperId)`,
             `CREATE INDEX idx_records_userId ON records(userId)`,
+            `CREATE INDEX idx_records_paper_score ON records(paperId, score DESC, totalTime ASC)`,
             `CREATE INDEX idx_user_exams_userId ON user_exams(userId)`,
-            `CREATE INDEX idx_user_exams_paperId ON user_exams(paperId)`
+            `CREATE INDEX idx_user_exams_paperId ON user_exams(paperId)`,
+            `CREATE INDEX idx_system_logs_createdAt ON system_logs(createdAt)`,
+            `CREATE INDEX idx_system_logs_userId ON system_logs(userId)`
         ];
 
         for (const sql of tables) {
@@ -503,6 +534,16 @@ const mysqlAdapter = {
             }
         } catch (e) {
             console.error('MySQL migration error (questions.must):', e.message);
+        }
+
+        try {
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM questions LIKE 'updatedBy'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding updatedBy column to questions table');
+                await this.pool.query("ALTER TABLE questions ADD COLUMN updatedBy VARCHAR(255)");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (questions.updatedBy):', e.message);
         }
 
         try {
@@ -634,6 +675,7 @@ const postgresAdapter = {
                 "groupId" VARCHAR(255),
                 "must" INTEGER DEFAULT 0,
                 "updatedAt" VARCHAR(50),
+                "updatedBy" VARCHAR(255),
                 "correctCount" INT DEFAULT 0,
                 "totalCount" INT DEFAULT 0
             )`,
@@ -705,13 +747,27 @@ const postgresAdapter = {
                 deadline VARCHAR(50),
                 UNIQUE("userId", "paperId")
             )`,
+            `CREATE TABLE IF NOT EXISTS system_logs_archive (
+                id VARCHAR(255) PRIMARY KEY,
+                action VARCHAR(50) NOT NULL,
+                target VARCHAR(50) NOT NULL,
+                "targetId" VARCHAR(255),
+                "userId" VARCHAR(255),
+                username VARCHAR(255),
+                details TEXT,
+                ip VARCHAR(100),
+                "createdAt" VARCHAR(50) NOT NULL
+            )`,
             `CREATE INDEX IF NOT EXISTS idx_users_groupId ON users("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_questions_groupId ON questions("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_papers_groupId ON papers("groupId")`,
             `CREATE INDEX IF NOT EXISTS idx_records_paperId ON records("paperId")`,
             `CREATE INDEX IF NOT EXISTS idx_records_userId ON records("userId")`,
+            `CREATE INDEX IF NOT EXISTS idx_records_paper_score ON records("paperId", score DESC, "totalTime" ASC)`,
             `CREATE INDEX IF NOT EXISTS idx_user_exams_userId ON user_exams("userId")`,
-            `CREATE INDEX IF NOT EXISTS idx_user_exams_paperId ON user_exams("paperId")`
+            `CREATE INDEX IF NOT EXISTS idx_user_exams_paperId ON user_exams("paperId")`,
+            `CREATE INDEX IF NOT EXISTS idx_system_logs_createdAt ON system_logs("createdAt")`,
+            `CREATE INDEX IF NOT EXISTS idx_system_logs_userId ON system_logs("userId")`
         ];
 
         for (const sql of tables) {
@@ -808,6 +864,20 @@ const postgresAdapter = {
             const result = await this.pool.query(`
                 SELECT column_name 
                 FROM information_schema.columns 
+                WHERE table_name='questions' AND column_name='updatedBy'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding updatedBy column to questions table');
+                await this.pool.query('ALTER TABLE questions ADD COLUMN "updatedBy" VARCHAR(255)');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (questions.updatedBy):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
                 WHERE table_name='questions' AND column_name='updatedAt'
             `);
             if (result.rows.length === 0) {
@@ -882,6 +952,8 @@ const postgresAdapter = {
             let pgSql = sql;
             let idx = 0;
             pgSql = pgSql.replace(/\?/g, () => `$${++idx}`);
+            // 将反引号转换为双引号（PostgreSQL 中的标识符保护）
+            pgSql = pgSql.replace(/`/g, '"');
 
             const result = await this.pool.query(pgSql, params);
             return result.rows;
@@ -896,6 +968,7 @@ const postgresAdapter = {
             let pgSql = sql;
             let idx = 0;
             pgSql = pgSql.replace(/\?/g, () => `$${++idx}`);
+            pgSql = pgSql.replace(/`/g, '"');
 
             await this.pool.query(pgSql, params);
         } catch (e) {
@@ -931,7 +1004,52 @@ async function initDatabase() {
     currentDbType = dbType;
     currentDb = getAdapter(dbType);
     await currentDb.init();
+
+    // 默认开启自动归档（日志超过1年）
+    try {
+        await autoArchiveSystemLogs();
+    } catch (e) {
+        console.error('自动归档系统日志失败:', e.message);
+    }
+
     return currentDb;
+}
+
+/**
+ * 自动归档1年之前的日志
+ */
+async function autoArchiveSystemLogs() {
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const dateStr = oneYearAgo.toISOString();
+
+    console.log(`[Archive] Checking for logs older than ${dateStr}...`);
+
+    // 1. 将老数据移动到归档表
+    const cols = 'id, action, target, targetId, userId, username, details, ip, createdAt';
+    const safeCols = currentDbType === 'postgres' 
+        ? 'id, action, target, "targetId", "userId", username, details, ip, "createdAt"'
+        : cols.split(',').map(c => getSafeName(c.trim(), currentDbType)).join(',');
+
+    const insertSql = `INSERT INTO ${getSafeName('system_logs_archive', currentDbType)} (${safeCols}) 
+                       SELECT ${safeCols} FROM ${getSafeName('system_logs', currentDbType)} 
+                       WHERE ${getSafeName('createdAt', currentDbType)} < ?`;
+    
+    // 2. 删除原表中的老数据
+    const deleteSql = `DELETE FROM ${getSafeName('system_logs', currentDbType)} 
+                       WHERE ${getSafeName('createdAt', currentDbType)} < ?`;
+
+    const oldLogs = await query(`SELECT COUNT(1) as cnt FROM ${getSafeName('system_logs', currentDbType)} WHERE ${getSafeName('createdAt', currentDbType)} < ?`, [dateStr]);
+    const count = oldLogs[0].cnt || oldLogs[0].count || 0;
+
+    if (count > 0) {
+        console.log(`[Archive] Archiving ${count} log entries to system_logs_archive...`);
+        await run(insertSql, [dateStr]);
+        await run(deleteSql, [dateStr]);
+        console.log(`[Archive] Successfully archived ${count} logs.`);
+    } else {
+        console.log('[Archive] No logs to archive.');
+    }
 }
 
 function getSafeName(name, dbType) {
@@ -1218,10 +1336,10 @@ module.exports = {
             // 如果提供了密码，默认重置 isFirstLogin 为 1，除非明确指定
             const isFirstLogin = user.isFirstLogin !== undefined ? user.isFirstLogin : 1;
             await run("UPDATE `users` SET `username`=?, `password`=?, `role`=?, `groupId`=?, `isFirstLogin`=?, `feishuUserId`=?, `feishuOpenId`=?, `feishuEnabled`=? WHERE `id`=?",
-                [user.username, hashedPwd, user.role, user.groupId, isFirstLogin, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
+                [user.username, hashedPwd, user.role, user.groupId !== undefined ? user.groupId : null, isFirstLogin, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         } else {
             await run("UPDATE `users` SET `username`=?, `role`=?, `groupId`=?, `feishuUserId`=?, `feishuOpenId`=?, `feishuEnabled`=? WHERE `id`=?",
-                [user.username, user.role, user.groupId, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
+                [user.username, user.role, user.groupId !== undefined ? user.groupId : null, user.feishuUserId || null, user.feishuOpenId || null, user.feishuEnabled !== undefined ? user.feishuEnabled : 1, user.id]);
         }
         return sanitizeUser(user);
     },
@@ -1326,14 +1444,14 @@ module.exports = {
     addQuestion: async (q) => {
         const id = q.id || generateId('q_');
         const now = new Date().toISOString();
-        await run("INSERT INTO `questions` (`id`, `type`, `content`, `options`, `answer`, `category`, `deviceType`, `groupId`, `must`, `updatedAt`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now]);
+        await run("INSERT INTO `questions` (`id`, `type`, `content`, `options`, `answer`, `category`, `deviceType`, `groupId`, `must`, `updatedAt`, `updatedBy`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [id, q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now, q.updatedBy || null]);
         return { id, ...q, updatedAt: now };
     },
     updateQuestion: async (q) => {
         const now = new Date().toISOString();
-        await run("UPDATE `questions` SET `type`=?, `content`=?, `options`=?, `answer`=?, `category`=?, `deviceType`=?, `groupId`=?, `must`=?, `updatedAt`=? WHERE `id`=?",
-            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now, q.id]);
+        await run("UPDATE `questions` SET `type`=?, `content`=?, `options`=?, `answer`=?, `category`=?, `deviceType`=?, `groupId`=?, `must`=?, `updatedAt`=?, `updatedBy`=? WHERE `id`=?",
+            [q.type, q.content, JSON.stringify(q.options || []), JSON.stringify(q.answer), q.category || null, q.deviceType || null, q.groupId || null, q.must ? 1 : 0, now, q.updatedBy || null, q.id]);
         return { ...q, updatedAt: now };
     },
     deleteQuestion: async (id) => {
@@ -1417,7 +1535,7 @@ module.exports = {
         return rows.map(normalizeRecord);
     },
     getRecordsByPaper: async (paperId) => {
-        const rows = await query("SELECT * FROM `records` WHERE paperId = ?", [paperId]);
+        const rows = await query("SELECT * FROM `records` WHERE paperId = ? ORDER BY score DESC, totalTime ASC", [paperId]);
         return rows.map(normalizeRecord);
     },
     addRecord: async (record) => {
