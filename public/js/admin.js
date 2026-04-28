@@ -1896,13 +1896,23 @@ function loadPapers() {
         const user = cachedData.users.find(u => u.id === creatorId);
         return user ? user.username : '未知用户';
     };
-    const getPaperBelong = (creatorId) => {
+    const getPaperBelong = (paper) => {
+        if (!paper) return '未知';
+        // 如果试卷本身记录了归属分组，优先使用
+        if (paper.groupId) {
+            const gids = String(paper.groupId).split(',').filter(Boolean);
+            const names = gids.map(id => cachedData.groups.find(g => g.id === id)?.name).filter(Boolean);
+            if (names.length > 0) return names.join(', ');
+        }
+        // 回退到创建者信息
+        const creatorId = paper.creatorId;
         if (!creatorId) return '超级管理员';
         const user = cachedData.users.find(u => u.id === creatorId);
         if (!user) return '未知用户';
         if (!user.groupId) return '超级管理员';
-        const group = cachedData.groups.find(g => g.id === user.groupId);
-        return group ? group.name : '未知分组';
+        const gids = String(user.groupId).split(',').filter(Boolean);
+        const names = gids.map(id => cachedData.groups.find(g => g.id === id)?.name).filter(Boolean);
+        return names.length > 0 ? names.join(', ') : '未知分组';
     };
 
     const html = papers.length ? `<table class="data-table"><thead><tr>
@@ -1915,12 +1925,14 @@ function loadPapers() {
       <th style="width:260px;text-align:center;">操作</th>
     </tr></thead>
     <tbody>${papers.map((p, index) => {
-        const canManage = currentUser.role === 'super_admin' || p.creatorId === currentUser.id;
+        const isCreator = p.creatorId === currentUser.id;
+        const inManagerGroup = p.groupId && hasCommonGroup(p.groupId, currentUser.groupId);
+        const canManage = currentUser.role === 'super_admin' || isCreator || inManagerGroup;
         return `<tr>
       <td style="text-align:center;">${index + 1}</td>
       <td style="text-align:center;">${escapeHtml(p.name)}</td>
       <td style="text-align:center;">${escapeHtml(getCreatorName(p.creatorId))}</td>
-      <td style="text-align:center;">${escapeHtml(getPaperBelong(p.creatorId))}</td>
+      <td style="text-align:center;">${escapeHtml(getPaperBelong(p))}</td>
       <td style="white-space:nowrap;text-align:center;">${formatFullDateTime(p.createDate)}</td>
       <td style="text-align:center;">
         <button class="btn btn-sm btn-secondary" data-id="${p.id}" onclick="safeOnclick(this, 'showPushLogs', ['id'])">推送记录</button>

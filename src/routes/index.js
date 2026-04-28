@@ -779,18 +779,30 @@ module.exports = function initRoutes(app, context) {
     });
 
     app.get('/api/papers', adminMiddleware, async (req, res) => {
-        const filter = {};
-        if (req.user.role !== 'super_admin') {
-            filter.creatorId = req.user.id;
+        const user = req.user;
+        const papers = await db.getPapers();
+
+        if (user.role === 'super_admin') {
+            return res.json(papers);
         }
-        res.json(await db.getPapers(filter));
+
+        // 组管：能看到自己创建的，或者是所属分组关联的试卷
+        res.json(papers.filter(p => {
+            const isCreator = p.creatorId === user.id;
+            const inManagerGroup = p.groupId && hasCommonGroup(p.groupId, user.groupId);
+            return isCreator || inManagerGroup;
+        }));
     });
 
     app.get('/api/papers/:id', adminMiddleware, async (req, res) => {
         const paper = await db.getPaperById(req.params.id);
         if (paper) {
-            if (req.user.role !== 'super_admin' && paper.creatorId !== req.user.id) {
-                return res.status(403).json({ error: '无权访问该试卷' });
+            if (req.user.role !== 'super_admin') {
+                const isCreator = paper.creatorId === req.user.id;
+                const inManagerGroup = paper.groupId && hasCommonGroup(paper.groupId, req.user.groupId);
+                if (!isCreator && !inManagerGroup) {
+                    return res.status(403).json({ error: '无权访问该试卷' });
+                }
             }
             res.json(paper);
         } else {
@@ -822,8 +834,12 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
-            return res.status(403).json({ error: '无权修改' });
+        if (req.user.role !== 'super_admin') {
+            const isCreator = existing.creatorId === req.user.id;
+            const inManagerGroup = existing.groupId && hasCommonGroup(existing.groupId, req.user.groupId);
+            if (!isCreator && !inManagerGroup) {
+                return res.status(403).json({ error: '无权修改该试卷' });
+            }
         }
 
         const paper = {
@@ -851,8 +867,12 @@ module.exports = function initRoutes(app, context) {
         }
 
         // 权限检查
-        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
-            return res.status(403).json({ error: '无权发布该试卷' });
+        if (req.user.role !== 'super_admin') {
+            const isCreator = existing.creatorId === req.user.id;
+            const inManagerGroup = existing.groupId && hasCommonGroup(existing.groupId, req.user.groupId);
+            if (!isCreator && !inManagerGroup) {
+                return res.status(403).json({ error: '无权发布该试卷' });
+            }
         }
 
         let targetGroups = req.body.targetGroups || [];
@@ -863,7 +883,7 @@ module.exports = function initRoutes(app, context) {
 
         // 分组管理员只能推送到本组
         if (req.user.role !== 'super_admin') {
-            targetGroups = [req.user.groupId];
+            targetGroups = String(req.user.groupId || '').split(',').filter(Boolean);
         }
 
         // 更新试卷的最新推送信息
@@ -908,8 +928,12 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
-            return res.status(403).json({ error: '无权查看' });
+        if (req.user.role !== 'super_admin') {
+            const isCreator = existing.creatorId === req.user.id;
+            const inManagerGroup = existing.groupId && hasCommonGroup(existing.groupId, req.user.groupId);
+            if (!isCreator && !inManagerGroup) {
+                return res.status(403).json({ error: '无权查看该试卷的推送记录' });
+            }
         }
 
         const logs = await db.getPushLogsByPaper(req.params.id);
@@ -920,8 +944,12 @@ module.exports = function initRoutes(app, context) {
         const existing = await db.getPaperById(req.params.id);
         if (!existing) return res.status(404).json({ error: '试卷不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.creatorId !== req.user.id) {
-            return res.status(403).json({ error: '无权删除' });
+        if (req.user.role !== 'super_admin') {
+            const isCreator = existing.creatorId === req.user.id;
+            const inManagerGroup = existing.groupId && hasCommonGroup(existing.groupId, req.user.groupId);
+            if (!isCreator && !inManagerGroup) {
+                return res.status(403).json({ error: '无权删除该试卷' });
+            }
         }
 
         await db.deletePaper(req.params.id);
