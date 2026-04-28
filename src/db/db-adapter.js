@@ -1545,7 +1545,11 @@ module.exports = {
 
     // ==================== 记录相关 ====================
     getRecords: async () => {
-        const rows = await query("SELECT * FROM `records`");
+        const rows = await query("SELECT * FROM `records` ORDER BY `submitDate` DESC");
+        return rows.map(normalizeRecord);
+    },
+    getRecordsByUser: async (userId) => {
+        const rows = await query("SELECT * FROM `records` WHERE `userId` = ? ORDER BY `submitDate` DESC", [userId]);
         return rows.map(normalizeRecord);
     },
     getRecordsByPaper: async (paperId) => {

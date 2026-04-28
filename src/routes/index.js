@@ -750,6 +750,9 @@ module.exports = function initRoutes(app, context) {
     app.get('/api/papers/ranking-list', async (req, res) => {
         const user = req.user;
         const papers = await db.getPapers();
+        // 获取用户参加过的考试记录，确保参加过的考试始终可见
+        const userRecords = await db.getRecordsByUser(user.id);
+        const recordPaperIds = new Set(userRecords.map(r => r.paperId));
 
         if (user.role === 'super_admin') {
             return res.json(papers);
@@ -758,11 +761,11 @@ module.exports = function initRoutes(app, context) {
         const userGroups = String(user.groupId || '').split(',').filter(Boolean);
 
         if (user.role === 'group_admin') {
-            // 组管：能看到自己创建的，或者是所属分组创建的，或者是推送到所属分组的试卷
+            // 组管：能看到自己创建的，或者是所属分组关联的，或者是推送到所属分组的试卷
             return res.json(papers.filter(p => {
                 const isCreator = p.creatorId === user.id;
                 const inManagerGroup = p.groupId && hasCommonGroup(p.groupId, user.groupId);
-                const targetedToGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
+                const targetedToGroup = p.targetGroups && p.targetGroups.some(tg => hasCommonGroup(tg, user.groupId));
                 return isCreator || inManagerGroup || targetedToGroup;
             }));
         }
@@ -773,7 +776,9 @@ module.exports = function initRoutes(app, context) {
             // 检查试卷发布目标分组与用户所属分组是否有交集
             const inGroup = p.targetGroups && p.targetGroups.some(tg => hasCommonGroup(tg, user.groupId));
             const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
-            return inGroup || inUsers;
+            // 如果用户参加过该考试，也应该能看到排名
+            const hasRecord = recordPaperIds.has(p.id);
+            return inGroup || inUsers || hasRecord;
         });
 
         res.json(visiblePapers);
@@ -982,7 +987,7 @@ module.exports = function initRoutes(app, context) {
             const availablePromises = papers.map(async p => {
                 if (!p.published) return null;
 
-                const isInGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
+                const isInGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.some(ug => hasCommonGroup(tg, ug)));
                 const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
                 if (!isInGroup && !isTargetUser) return null;
 
@@ -1233,9 +1238,8 @@ module.exports = function initRoutes(app, context) {
                 }
             }
         } else {
-            const userGroups = String(user.groupId || '').split(',').filter(Boolean);
             const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                ? paper.targetGroups.some(tg => userGroups.includes(tg))
+                ? paper.targetGroups.some(tg => hasCommonGroup(tg, user.groupId))
                 : false;
             const inUsers = paper.targetUsers && paper.targetUsers.length > 0
                 ? paper.targetUsers.includes(user.id)
@@ -1625,9 +1629,8 @@ module.exports = function initRoutes(app, context) {
                 }
             }
         } else {
-            const userGroups = String(user.groupId || '').split(',').filter(Boolean);
             const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                ? paper.targetGroups.some(tg => userGroups.includes(tg))
+                ? paper.targetGroups.some(tg => hasCommonGroup(tg, user.groupId))
                 : false;
             const inUsers = paper.targetUsers && paper.targetUsers.length > 0
                 ? paper.targetUsers.includes(user.id)
