@@ -770,7 +770,8 @@ module.exports = function initRoutes(app, context) {
         // 考生逻辑
         const visiblePapers = papers.filter(p => {
             if (!p.published) return false;
-            const inGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
+            // 检查试卷发布目标分组与用户所属分组是否有交集
+            const inGroup = p.targetGroups && p.targetGroups.some(tg => hasCommonGroup(tg, user.groupId));
             const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
             return inGroup || inUsers;
         });
@@ -1353,13 +1354,18 @@ module.exports = function initRoutes(app, context) {
         if (requester.role !== 'super_admin') {
             const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
             const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
-            const inGroup = requester.groupId ? targetGroups.includes(requester.groupId) : false;
+            
+            // 检查用户是否在发布目标范围内
+            const inGroup = requester.groupId ? targetGroups.some(tg => hasCommonGroup(tg, requester.groupId)) : false;
             const inUsers = targetUsers.includes(requester.id);
 
             if (requester.role === 'group_admin') {
-                const canSee = paper.creatorId === requester.id || inGroup || inUsers;
+                // 组管：自己创建的，或者是自己管辖分组的试卷，或者被推送给自己的
+                const inManagerGroup = paper.groupId && hasCommonGroup(paper.groupId, requester.groupId);
+                const canSee = paper.creatorId === requester.id || inManagerGroup || inGroup || inUsers;
                 if (!canSee) return res.status(403).json({ error: '无权查看排行榜' });
             } else {
+                // 考生：必须是被推送的目标
                 if (!inGroup && !inUsers) return res.status(403).json({ error: '无权查看排行榜' });
             }
         }
@@ -1376,7 +1382,8 @@ module.exports = function initRoutes(app, context) {
         if (targetGroupIds.length > 0 || targetUserIds.length > 0) {
             if (targetGroupIds.length > 0) {
                 studentUsers.forEach(u => {
-                    if (u.groupId && targetGroupIds.includes(u.groupId)) {
+                    // 检查用户所属分组是否在试卷推送目标分组中
+                    if (u.groupId && targetGroupIds.some(tg => hasCommonGroup(tg, u.groupId))) {
                         assignedUserIdSet.add(u.id);
                     }
                 });
