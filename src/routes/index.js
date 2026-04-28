@@ -57,6 +57,15 @@ const createRateLimiter = ({ windowMs, max, keyFn }) => {
 
 module.exports = function initRoutes(app, context) {
     const { sessionStore, sseClients, broadcast, upload } = context;
+
+    // 辅助函数：判断两个分组ID字符串（可能包含多个ID，以逗号分隔）是否有交集
+    const hasCommonGroup = (groupIds1, groupIds2) => {
+        if (!groupIds1 || !groupIds2) return false;
+        const arr1 = String(groupIds1).split(',').filter(Boolean);
+        const arr2 = String(groupIds2).split(',').filter(Boolean);
+        return arr1.some(id => arr2.includes(id));
+    };
+
     const loginLimiter = createRateLimiter({
         windowMs: Number(process.env.LOGIN_RATE_WINDOW_MS || 5 * 60 * 1000),
         max: Number(process.env.LOGIN_RATE_MAX || 30),
@@ -311,7 +320,7 @@ module.exports = function initRoutes(app, context) {
             }
         }
         // 3. 非超管只能删除本组成员
-        if (req.user.role !== 'super_admin' && targetUser.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && !hasCommonGroup(targetUser.groupId, req.user.groupId)) {
             return res.status(403).json({ error: '无权操作该用户' });
         }
 
@@ -340,7 +349,7 @@ module.exports = function initRoutes(app, context) {
             if (targetUser.role === 'super_admin') {
                 return res.status(403).json({ error: '无权操作超级管理员' });
             }
-            if (targetUser.groupId !== req.user.groupId) {
+            if (!hasCommonGroup(targetUser.groupId, req.user.groupId)) {
                 return res.status(403).json({ error: '无权操作该用户' });
             }
 
@@ -650,7 +659,7 @@ module.exports = function initRoutes(app, context) {
         if (!existing) return res.status(404).json({ error: '题目不存在' });
 
         // 权限检查
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && !hasCommonGroup(existing.groupId, req.user.groupId)) {
             return res.status(403).json({ error: '无权修改公共题库或其他分组题库' });
         }
 
@@ -676,7 +685,7 @@ module.exports = function initRoutes(app, context) {
         // 权限检查
         if (req.user.role !== 'super_admin') {
             // 组管只能删除本组题库，不能删除全部或公共
-            if (!groupId || groupId === 'all' || groupId === 'public' || groupId !== req.user.groupId) {
+            if (!groupId || groupId === 'all' || groupId === 'public' || !hasCommonGroup(groupId, req.user.groupId)) {
                 return res.status(403).json({ error: '无权执行此操作' });
             }
         }
@@ -692,7 +701,7 @@ module.exports = function initRoutes(app, context) {
         const existing = (await db.getQuestions()).find(q => q.id === req.params.id);
         if (!existing) return res.status(404).json({ error: '题目不存在' });
 
-        if (req.user.role !== 'super_admin' && existing.groupId !== req.user.groupId) {
+        if (req.user.role !== 'super_admin' && !hasCommonGroup(existing.groupId, req.user.groupId)) {
             return res.status(403).json({ error: '无权删除' });
         }
 
@@ -746,13 +755,22 @@ module.exports = function initRoutes(app, context) {
             return res.json(papers);
         }
 
+        const userGroups = String(user.groupId || '').split(',').filter(Boolean);
+
         if (user.role === 'group_admin') {
-            return res.json(papers.filter(p => p.groupId === user.groupId));
+            // 组管：能看到自己创建的，或者是所属分组创建的，或者是推送到所属分组的试卷
+            return res.json(papers.filter(p => {
+                const isCreator = p.creatorId === user.id;
+                const inManagerGroup = p.groupId && hasCommonGroup(p.groupId, user.groupId);
+                const targetedToGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
+                return isCreator || inManagerGroup || targetedToGroup;
+            }));
         }
 
+        // 考生逻辑
         const visiblePapers = papers.filter(p => {
             if (!p.published) return false;
-            const inGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+            const inGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
             const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
             return inGroup || inUsers;
         });
@@ -922,19 +940,20 @@ module.exports = function initRoutes(app, context) {
         if (requester.role === 'student' && user.id !== requester.id) {
             return res.status(403).json({ error: '无权访问' });
         }
-        if (requester.role === 'group_admin' && requester.groupId && user.groupId !== requester.groupId) {
+        if (requester.role === 'group_admin' && requester.groupId && !hasCommonGroup(user.groupId, requester.groupId)) {
             return res.status(403).json({ error: '无权访问' });
         }
 
         const assignments = await db.getUserAssignedPapers(user.id);
         const papers = await db.getPapers();
 
+        const userGroups = String(user.groupId || '').split(',').filter(Boolean);
         let results;
         if (!assignments || assignments.length === 0) {
             const availablePromises = papers.map(async p => {
                 if (!p.published) return null;
 
-                const isInGroup = p.targetGroups && p.targetGroups.includes(user.groupId);
+                const isInGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.includes(tg));
                 const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
                 if (!isInGroup && !isTargetUser) return null;
 
@@ -1185,8 +1204,9 @@ module.exports = function initRoutes(app, context) {
                 }
             }
         } else {
+            const userGroups = String(user.groupId || '').split(',').filter(Boolean);
             const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                ? paper.targetGroups.includes(user.groupId)
+                ? paper.targetGroups.some(tg => userGroups.includes(tg))
                 : false;
             const inUsers = paper.targetUsers && paper.targetUsers.length > 0
                 ? paper.targetUsers.includes(user.id)
@@ -1374,7 +1394,7 @@ module.exports = function initRoutes(app, context) {
         if (req.user.role !== 'super_admin') {
             const targetGroups = Array.isArray(paper.targetGroups) ? paper.targetGroups : [];
             const targetUsers = Array.isArray(paper.targetUsers) ? paper.targetUsers : [];
-            const inGroup = req.user.groupId ? targetGroups.includes(req.user.groupId) : false;
+            const inGroup = req.user.groupId ? hasCommonGroup(targetGroups.join(','), req.user.groupId) : false;
             const inUsers = targetUsers.includes(req.user.id);
             if (req.user.role === 'group_admin') {
                 const canSee = paper.creatorId === req.user.id || inGroup || inUsers;
@@ -1570,8 +1590,9 @@ module.exports = function initRoutes(app, context) {
                 }
             }
         } else {
+            const userGroups = String(user.groupId || '').split(',').filter(Boolean);
             const inGroup = paper.targetGroups && paper.targetGroups.length > 0
-                ? paper.targetGroups.includes(user.groupId)
+                ? paper.targetGroups.some(tg => userGroups.includes(tg))
                 : false;
             const inUsers = paper.targetUsers && paper.targetUsers.length > 0
                 ? paper.targetUsers.includes(user.id)

@@ -221,16 +221,23 @@ async function loadRanking(paperId) {
     const cls = passed ? 'text-success' : 'text-danger';
     return `
     <div class="my-score mb-6">
-      <div class="score-item"><span class="score-label">考生：</span><span class="score-value">${escapeHtml(user.username)}</span></div>
-      <div class="score-item"><span class="score-label">得分：</span><span class="score-value">${myRecord.score}</span></div>
-      <div class="score-item"><span class="score-label">成绩：</span><span class="score-value ${cls}">${label}</span></div>
-      <div class="score-item"><span class="score-label">排名：</span><span class="score-value">${myRecord.rank}/${totalAssigned}</span></div>
-      <div class="score-item"><span class="score-label">答题用时：</span><span class="score-value">${formatDuration(myRecord.totalTime, true)}</span></div>
-      <div class="score-item"><span class="score-label">交卷时间：</span><span class="score-value">${formatFullDateTime(myRecord.submitDate)}</span></div>
+      <div class="my-score-row">
+        <div class="score-item"><span class="score-label">考生:</span><span class="score-value">${escapeHtml(user.username)}</span></div>
+        <div class="score-item"><span class="score-label">得分:</span><span class="score-value">${myRecord.score}</span></div>
+        <div class="score-item"><span class="score-label">排名:</span><span class="score-value">${myRecord.rank}/${totalAssigned}</span></div>
+      </div>
+      <div class="my-score-row">
+        <div class="score-item"><span class="score-label">成绩:</span><span class="score-value ${cls}">${label}</span></div>
+        <div class="score-item"><span class="score-label">用时:</span><span class="score-value">${formatDuration(myRecord.totalTime, true)}</span></div>
+      </div>
+      <div class="my-score-row">
+        <div class="score-item"><span class="score-label">交卷时间:</span><span class="score-value">${formatFullDateTime(myRecord.submitDate)}</span></div>
+      </div>
     </div>`;
   })() : '';
 
-  html += `<div class="table-container"><table class="data-table">
+  // PC 表格视图
+  html += `<div class="ranking-table-view table-container"><table class="data-table">
     <thead><tr><th>排名</th><th>考生</th><th>得分</th><th>成绩</th><th>用时</th><th style="width:180px;">交卷时间</th></tr></thead>
     <tbody>${ranking.map(r => {
       const passed = passScore > 0 ? r.score >= passScore : true;
@@ -246,6 +253,37 @@ async function loadRanking(paperId) {
         <td style="white-space:nowrap;">${formatFullDateTime(r.submitDate)}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
+
+  // 移动端卡片视图
+  html += `<div class="ranking-cards-view">
+    ${ranking.map(r => {
+      const passed = passScore > 0 ? r.score >= passScore : true;
+      const label = passed ? '及格' : '不及格';
+      const cls = passed ? 'text-success' : 'text-danger';
+      return `
+      <div class="ranking-card ${r.userId === user.id ? 'is-me' : ''}">
+        <div class="ranking-card-header">
+          <div class="ranking-card-rank">
+            ${r.rank <= 3 ? `<span class="rank-badge rank-${r.rank}">${r.rank}</span>` : `<span class="rank-number">${r.rank}/${totalAssigned}</span>`}
+          </div>
+          <div class="ranking-card-user">${escapeHtml(r.username)}${r.userId === user.id ? ' (我)' : ''}</div>
+          <div class="ranking-card-status ${cls}">${label}</div>
+          <div class="ranking-card-score"><strong>${r.score}</strong> 分</div>
+        </div>
+        <div class="ranking-card-body">
+          <div class="ranking-card-row">
+            <div class="ranking-card-item">
+              <span class="label">用时:</span>
+              <span class="value">${formatDuration(r.totalTime, true)}</span>
+            </div>
+            <div class="ranking-card-item">
+              <span class="label">交卷:</span>
+              <span class="value">${formatFullDateTime(r.submitDate)}</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
 
   container.innerHTML = html;
 }

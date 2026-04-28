@@ -417,16 +417,37 @@ start_app() {
     echo -e "${GREEN}>>> 正在启动服务...${NC}"
     
     if is_pm2_installed; then
-        echo -e "${BLUE}检测到 PM2，将使用 ecosystem.config.js 启动集群模式...${NC}"
+        # 预检本次配置所需的运行模式
+        local use_redis=$(grep "^USE_REDIS=" .env | cut -d'=' -f2 | tr -d ' \r')
+        local db_type=$(grep "^DB_TYPE=" .env | cut -d'=' -f2 | tr -d ' \r' | tr '[:upper:]' '[:lower:]')
+        local target_mode="fork"
+        if [ "$use_redis" = "true" ] && [ "$db_type" != "sqlite" ]; then
+            target_mode="cluster"
+        fi
+
         if is_app_in_pm2; then
-            pm2 reload ecosystem.config.js --env production --update-env \
-                || pm2 restart exam-system --update-env \
-                || (pm2 delete exam-system && pm2 start ecosystem.config.js --env production --update-env)
+            # 检查当前已存在的模式
+            local current_mode="fork"
+            if pm2 show exam-system | grep -q "cluster_mode"; then
+                current_mode="cluster"
+            fi
+
+            if [ "$current_mode" != "$target_mode" ]; then
+                echo -e "${YELLOW}检测到模式变更 ($current_mode -> $target_mode)，正在重置进程...${NC}"
+                pm2 delete exam-system > /dev/null 2>&1
+                pm2 start ecosystem.config.js --env production --update-env
+            else
+                echo -e "${BLUE}检测到 PM2，将使用 ecosystem.config.js 启动/重载${NC}"
+                pm2 reload ecosystem.config.js --env production --update-env \
+                    || pm2 restart exam-system --update-env
+            fi
         else
+            echo -e "${BLUE}检测到 PM2，第一次启动应用...${NC}"
             pm2 start ecosystem.config.js --env production --update-env
         fi
+        
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}服务已通过 PM2 启动成功!${NC}"
+            echo -e "${GREEN}服务已通过 PM2 启动成功! (模式: $target_mode)${NC}"
             if [ "$persist" = true ]; then
                 pm2 save
                 echo -e "${BLUE}已执行 pm2 save 保持自启状态${NC}"

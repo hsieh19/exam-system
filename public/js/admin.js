@@ -2,6 +2,14 @@ let editingQuestion = null;
 let editingUserId = null; // 新增：用于标记当前正在编辑的用户
 let selectedGroupId = null; // 当前选中的分组ID
 let cachedData = { groups: [], users: [], questions: [], papers: [], categories: [] };
+
+// 辅助函数：判断两个分组ID字符串（可能包含多个ID，以逗号分隔）是否有交集
+function hasCommonGroup(groupIds1, groupIds2) {
+    if (!groupIds1 || !groupIds2) return false;
+    const arr1 = String(groupIds1).split(',').filter(Boolean);
+    const arr2 = String(groupIds2).split(',').filter(Boolean);
+    return arr1.some(id => arr2.includes(id));
+}
 let groupAccordionOpen = true;
 let currentPage = 'users';
 let autoRefreshTimer = null;
@@ -9,7 +17,7 @@ let isRefreshing = false;
 
 // ========== 版本控制 ==========
 const AppConfig = {
-    version: '1.5.6', // 当前版本
+    version: '', // 将由后端 API /api/version 动态加载，实现 package.json 统一管理
     githubRepo: 'hsieh19/exam-system' // GitHub 仓库
 };
 
@@ -438,8 +446,8 @@ function renderUsers() {
 
             // 权限判断
             const canManageRole = currentUser.role === 'super_admin' && !isSelf;
-            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
-            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
+            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && hasCommonGroup(u.groupId, currentUser.groupId));
+            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && hasCommonGroup(u.groupId, currentUser.groupId) && !isGroupAdmin));
 
             const actions = [];
             if (canManageRole) {
@@ -480,8 +488,8 @@ function renderUsers() {
 
             // 权限判断
             const canManageRole = currentUser.role === 'super_admin' && !isSelf;
-            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId);
-            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && u.groupId === currentUser.groupId && !isGroupAdmin));
+            const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && hasCommonGroup(u.groupId, currentUser.groupId));
+            const canDelete = !isSelf && (currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && hasCommonGroup(u.groupId, currentUser.groupId) && !isGroupAdmin));
 
             const actions = [];
             if (canManageRole) {
@@ -1462,7 +1470,7 @@ function loadQuestions() {
     const html = questions.length ? `<div class="table-container"><table class="data-table">
     <thead><tr><th>序号</th><th>专业</th><th>设备类型</th><th>题库归属</th><th>题目</th><th>类型</th><th>必考题</th><th>最后修改时间</th><th>最后修改人</th><th>操作</th></tr></thead>
     <tbody>${questions.map((q, index) => {
-        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && q.groupId === currentUser.groupId);
+        const canEdit = currentUser.role === 'super_admin' || (currentUser.role === 'group_admin' && hasCommonGroup(q.groupId, currentUser.groupId));
         const canDelete = canEdit;
         const isMust = q.must ? 1 : 0;
 
@@ -2938,8 +2946,8 @@ function showPublishModal(paperId) {
 
     // 如果是分组管理员，只能推送给自己组
     if (currentUser.role === 'group_admin') {
-        groups = groups.filter(g => g.id === currentUser.groupId);
-        users = users.filter(u => u.groupId === currentUser.groupId);
+        groups = groups.filter(g => hasCommonGroup(g.id, currentUser.groupId));
+        users = users.filter(u => hasCommonGroup(u.groupId, currentUser.groupId));
     }
 
     // 预填充已选分组和截止时间

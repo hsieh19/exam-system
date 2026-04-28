@@ -1290,12 +1290,18 @@ module.exports = {
         const conditions = [];
 
         if (filter.groupId !== undefined) {
-            // 支持多分组过滤：如果是单分组则直接等于，如果是多分组则使用 LIKE
-            conditions.push("(groupId = ? OR groupId LIKE ? OR groupId LIKE ? OR groupId LIKE ?)");
-            params.push(filter.groupId);
-            params.push(filter.groupId + ',%');   // 开头
-            params.push('%,' + filter.groupId + ',%'); // 中间
-            params.push('%,' + filter.groupId);     // 结尾
+            const groupIds = String(filter.groupId).split(',').filter(Boolean);
+            if (groupIds.length > 0) {
+                const groupConditions = [];
+                groupIds.forEach(gid => {
+                    groupConditions.push("(groupId = ? OR groupId LIKE ? OR groupId LIKE ? OR groupId LIKE ?)");
+                    params.push(gid);
+                    params.push(gid + ',%');
+                    params.push('%,' + gid + ',%');
+                    params.push('%,' + gid);
+                });
+                conditions.push("(" + groupConditions.join(" OR ") + ")");
+            }
         }
 
         const sql = buildSelectSql('users', conditions);
@@ -1389,14 +1395,18 @@ module.exports = {
         }
 
         if (filter.groupId !== undefined) {
-            if (filter.includePublic) {
-                conditions.push("(groupId = ? OR groupId IS NULL)");
-            } else {
-                conditions.push("groupId = ?");
+            const groupIds = String(filter.groupId).split(',').filter(Boolean);
+            if (groupIds.length > 0) {
+                const placeholders = groupIds.map(() => "?").join(",");
+                if (filter.includePublic) {
+                    conditions.push(`(groupId IN (${placeholders}) OR groupId IS NULL OR groupId = '')`);
+                } else {
+                    conditions.push(`groupId IN (${placeholders})`);
+                }
+                params.push(...groupIds);
             }
-            params.push(filter.groupId);
         } else if (filter.onlyPublic) {
-            conditions.push("groupId IS NULL");
+            conditions.push("(groupId IS NULL OR groupId = '')");
         }
 
         const sql = buildSelectSql('questions', conditions);
@@ -1483,8 +1493,12 @@ module.exports = {
         const conditions = [];
 
         if (filter.groupId !== undefined) {
-            conditions.push("groupId = ?");
-            params.push(filter.groupId);
+            const groupIds = String(filter.groupId).split(',').filter(Boolean);
+            if (groupIds.length > 0) {
+                const placeholders = groupIds.map(() => "?").join(",");
+                conditions.push(`groupId IN (${placeholders})`);
+                params.push(...groupIds);
+            }
         }
 
         if (filter.creatorId !== undefined) {
