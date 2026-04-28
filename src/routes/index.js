@@ -1362,15 +1362,19 @@ module.exports = function initRoutes(app, context) {
             // 检查用户是否在发布目标范围内
             const inGroup = requester.groupId ? targetGroups.some(tg => hasCommonGroup(tg, requester.groupId)) : false;
             const inUsers = targetUsers.includes(requester.id);
+            
+            // 如果用户参加过该考试，也应该能看到排名
+            const record = await db.getRecordByUserAndPaper(requester.id, paperId);
+            const hasRecord = record !== null;
 
             if (requester.role === 'group_admin') {
-                // 组管：自己创建的，或者是自己管辖分组的试卷，或者被推送给自己的
+                // 组管：自己创建的，或者是自己管辖分组的试卷，或者被推送给自己的，或者参加过的
                 const inManagerGroup = paper.groupId && hasCommonGroup(paper.groupId, requester.groupId);
-                const canSee = paper.creatorId === requester.id || inManagerGroup || inGroup || inUsers;
+                const canSee = paper.creatorId === requester.id || inManagerGroup || inGroup || inUsers || hasRecord;
                 if (!canSee) return res.status(403).json({ error: '无权查看排行榜' });
             } else {
-                // 考生：必须是被推送的目标
-                if (!inGroup && !inUsers) return res.status(403).json({ error: '无权查看排行榜' });
+                // 考生：必须是被推送的目标，或者是参加过的
+                if (!inGroup && !inUsers && !hasRecord) return res.status(403).json({ error: '无权查看排行榜' });
             }
         }
 
