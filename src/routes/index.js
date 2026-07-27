@@ -772,7 +772,7 @@ module.exports = function initRoutes(app, context) {
 
         // 考生逻辑
         const visiblePapers = papers.filter(p => {
-            if (!p.published) return false;
+            if (!p.published || p.archived) return false;
             // 检查试卷发布目标分组与用户所属分组是否有交集
             const inGroup = p.targetGroups && p.targetGroups.some(tg => hasCommonGroup(tg, user.groupId));
             const inUsers = p.targetUsers && p.targetUsers.includes(user.id);
@@ -881,6 +881,10 @@ module.exports = function initRoutes(app, context) {
             }
         }
 
+        if (existing.archived) {
+            return res.status(400).json({ error: '归档试卷不可推送，请先取消归档' });
+        }
+
         let targetGroups = req.body.targetGroups || [];
         const targetUsers = req.body.targetUsers || [];
         const startTime = req.body.startTime;
@@ -985,7 +989,7 @@ module.exports = function initRoutes(app, context) {
         let results;
         if (!assignments || assignments.length === 0) {
             const availablePromises = papers.map(async p => {
-                if (!p.published) return null;
+                if (!p.published || p.archived) return null;
 
                 const isInGroup = p.targetGroups && p.targetGroups.some(tg => userGroups.some(ug => hasCommonGroup(tg, ug)));
                 const isTargetUser = p.targetUsers && p.targetUsers.includes(user.id);
@@ -1029,7 +1033,7 @@ module.exports = function initRoutes(app, context) {
             });
 
             const availablePromises = papers.map(async p => {
-                if (!p.published) return null;
+                if (!p.published || p.archived) return null;
                 const assignment = assignmentMap.get(p.id);
                 if (!assignment) return null;
 

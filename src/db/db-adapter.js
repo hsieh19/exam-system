@@ -126,7 +126,8 @@ const sqliteAdapter = {
                 creatorId TEXT,
                 shuffleQuestions INTEGER DEFAULT 0,
                 shuffleOptions INTEGER DEFAULT 0,
-                passScore INTEGER DEFAULT 0
+                passScore INTEGER DEFAULT 0,
+                archived INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS records (
                 id TEXT PRIMARY KEY,
@@ -231,6 +232,7 @@ const sqliteAdapter = {
         checkAndAddColumn('papers', 'shuffleQuestions', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'shuffleOptions', 'INTEGER DEFAULT 0');
         checkAndAddColumn('papers', 'passScore', 'INTEGER DEFAULT 0');
+        checkAndAddColumn('papers', 'archived', 'INTEGER DEFAULT 0');
         checkAndAddColumn('users', 'isFirstLogin', 'INTEGER DEFAULT 1');
         checkAndAddColumn('users', 'feishuUserId', 'TEXT');
         checkAndAddColumn('users', 'feishuOpenId', 'TEXT');
@@ -378,7 +380,8 @@ const mysqlAdapter = {
                 creatorId VARCHAR(255),
                 shuffleQuestions TINYINT DEFAULT 0,
                 shuffleOptions TINYINT DEFAULT 0,
-                passScore INT DEFAULT 0
+                passScore INT DEFAULT 0,
+                archived TINYINT DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -576,6 +579,16 @@ const mysqlAdapter = {
             console.error('MySQL migration error (questions.totalCount):', e.message);
         }
 
+        try {
+            const [columns] = await this.pool.query("SHOW COLUMNS FROM papers LIKE 'archived'");
+            if (columns.length === 0) {
+                console.log('MySQL: Adding archived column to papers table');
+                await this.pool.query("ALTER TABLE papers ADD COLUMN archived TINYINT DEFAULT 0");
+            }
+        } catch (e) {
+            console.error('MySQL migration error (papers.archived):', e.message);
+        }
+
         // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
         const adminUsername = process.env.INITIAL_ADMIN_USERNAME || 'admin';
         const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
@@ -693,7 +706,8 @@ const postgresAdapter = {
                 "creatorId" VARCHAR(255),
                 "shuffleQuestions" INTEGER DEFAULT 0,
                 "shuffleOptions" INTEGER DEFAULT 0,
-                "passScore" INTEGER DEFAULT 0
+                "passScore" INTEGER DEFAULT 0,
+                "archived" INTEGER DEFAULT 0
             )`,
             `CREATE TABLE IF NOT EXISTS records (
                 id VARCHAR(255) PRIMARY KEY,
@@ -928,6 +942,20 @@ const postgresAdapter = {
             }
         } catch (e) {
             console.error('PostgreSQL migration error (questions.totalCount):', e.message);
+        }
+
+        try {
+            const result = await this.pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='papers' AND column_name='archived'
+            `);
+            if (result.rows.length === 0) {
+                console.log('PostgreSQL: Adding archived column to papers table');
+                await this.pool.query('ALTER TABLE papers ADD COLUMN "archived" INTEGER DEFAULT 0');
+            }
+        } catch (e) {
+            console.error('PostgreSQL migration error (papers.archived):', e.message);
         }
 
         // 初始化默认管理员：仅在“全新空库”时创建，避免生产环境中被删除后又自动重建
@@ -1230,7 +1258,8 @@ function normalizePaper(paper) {
         targetUsers: parseJsonValue(paper.targetUsers, []),
         shuffleQuestions: !!paper.shuffleQuestions,
         shuffleOptions: !!paper.shuffleOptions,
-        passScore: paper.passScore == null ? 0 : Number(paper.passScore)
+        passScore: paper.passScore == null ? 0 : Number(paper.passScore),
+        archived: !!paper.archived
     };
 }
 
@@ -1527,13 +1556,14 @@ module.exports = {
         return { id, ...paper };
     },
     updatePaper: async (paper) => {
-        await run("UPDATE `papers` SET `name`=?, `questions`=?, `rules`=?, `targetGroups`=?, `targetUsers`=?, `startTime`=?, `deadline`=?, `groupId`=?, `creatorId`=?, `published`=?, `publishDate`=?, `createDate`=?, `shuffleQuestions`=?, `shuffleOptions`=?, `passScore`=? WHERE `id`=?",
+        await run("UPDATE `papers` SET `name`=?, `questions`=?, `rules`=?, `targetGroups`=?, `targetUsers`=?, `startTime`=?, `deadline`=?, `groupId`=?, `creatorId`=?, `published`=?, `publishDate`=?, `createDate`=?, `shuffleQuestions`=?, `shuffleOptions`=?, `passScore`=?, `archived`=? WHERE `id`=?",
             [paper.name, JSON.stringify(paper.questions || {}), JSON.stringify(paper.rules || []),
             JSON.stringify(paper.targetGroups || []), JSON.stringify(paper.targetUsers || []),
             paper.startTime || null, paper.deadline || null, paper.groupId || null, paper.creatorId || null,
             paper.published ? 1 : 0, paper.publishDate || null, paper.createDate || null,
             paper.shuffleQuestions ? 1 : 0, paper.shuffleOptions ? 1 : 0,
-            paper.passScore == null ? 0 : Number(paper.passScore), paper.id]);
+            paper.passScore == null ? 0 : Number(paper.passScore),
+            paper.archived ? 1 : 0, paper.id]);
         return paper;
     },
     deletePaper: async (id) => {

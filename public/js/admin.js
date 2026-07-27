@@ -14,6 +14,7 @@ let groupAccordionOpen = true;
 let currentPage = 'users';
 let autoRefreshTimer = null;
 let isRefreshing = false;
+let archiveModalOpen = false; // 归档管理弹窗开闭状态
 
 // ========== 版本控制 ==========
 const AppConfig = {
@@ -240,16 +241,23 @@ function updateQuestionFabVisibility() {
 }
 
 // ========== 模态框 ==========
-function openModal(title, bodyHtml, footerHtml) {
+let _modalOnClose = null; // 当前弹窗的关闭回调
+
+function openModal(title, bodyHtml, footerHtml, onClose) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
     document.getElementById('modal-footer').innerHTML = footerHtml;
     document.getElementById('modal-overlay').classList.add('active');
+    _modalOnClose = onClose || null;
 }
 
 function closeModal() {
     document.getElementById('modal-overlay').classList.remove('active');
     editingUserId = null; // 关闭时重置编辑状态
+    if (_modalOnClose) {
+        _modalOnClose();
+        _modalOnClose = null;
+    }
 }
 
 // ========== 分组管理 ==========
@@ -1889,7 +1897,7 @@ let autoGenerateConfig = {};
 function loadPaperGroups() { }
 
 function loadPapers() {
-    const papers = cachedData.papers;
+    const papers = cachedData.papers.filter(p => !p.archived);
     const currentUser = Storage.getCurrentUser();
     const getCreatorName = (creatorId) => {
         if (!creatorId) return '-';
@@ -1942,6 +1950,7 @@ function loadPapers() {
             ${canManage ? `
                 <button class="btn btn-sm btn-info" data-id="${p.id}" onclick="safeOnclick(this, 'editPaper', ['id'])">编辑</button>
                 <button class="btn btn-sm btn-primary" data-id="${p.id}" onclick="safeOnclick(this, 'showPublishModal', ['id'])">推送</button>
+                <button class="btn btn-sm btn-warning" data-id="${p.id}" onclick="safeOnclick(this, 'archivePaper', ['id'])">归档</button>
                 <button class="btn btn-sm btn-danger" data-id="${p.id}" onclick="safeOnclick(this, 'deletePaper', ['id'])">删除</button>
             ` : ''}
         </div>
@@ -3529,7 +3538,7 @@ async function exportQuestionsByGroup(groupId, groupName, filterOpts = {}, zip =
                 '是否必考': q.must ? '是' : '否',
                 '题目': q.content,
                 '正确答案': Array.isArray(q.answer) ? q.answer.join(',') :
-                    (type === 'judge' ? (q.answer === 'true' ? 'A' : 'B') : q.answer)
+                    (type === 'judge' ? (q.answer === 'true' || q.answer === 'A' ? 'A' : 'B') : q.answer)
             };
 
             const opts = (type === 'judge') ? ['正确', '错误'] : (q.options || []);
@@ -3740,9 +3749,9 @@ async function importQuestions(input) {
                     if (typeAlias === 'multiple') {
                         answer = answer.replace(/，/g, ',').split(',').map(s => s.trim().toUpperCase());
                     } else if (typeAlias === 'judge') {
-                        if (['A', '正确', 'TRUE', 'T'].includes(answer.toUpperCase())) answer = 'true';
-                        else if (['B', '错误', 'FALSE', 'F'].includes(answer.toUpperCase())) answer = 'false';
-                        else answer = 'true';
+                        if (['A', '正确', 'TRUE', 'T'].includes(answer.toUpperCase())) answer = 'A';
+                        else if (['B', '错误', 'FALSE', 'F'].includes(answer.toUpperCase())) answer = 'B';
+                        else answer = 'A';
                     } else {
                         answer = answer.toUpperCase();
                     }
@@ -3983,7 +3992,7 @@ function confirmImportQuestions(newQuestions) {
 
 // ========== 考试分析 ==========
 function loadAdminAnalysisOptions() {
-    const papers = cachedData.papers.filter(p => p.published);
+    const papers = cachedData.papers.filter(p => p.published && !p.archived);
     document.getElementById('analysis-paper-select').innerHTML = '<option value="">请选择要分析的试卷</option>' +
         papers.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
     document.getElementById('analysis-content').innerHTML = '<div class="empty-state"><h3>请选择试卷以生成分析报告</h3></div>';
@@ -4359,10 +4368,79 @@ async function deletePaper(id) {
             await Storage.deletePaper(id);
             await refreshCache();
             loadPapers();
+            if (archiveModalOpen) showArchiveManagement();
         }
     });
 }
 
+// ========== 试卷归档功能 ==========
+
+async function archivePaper(paperId) {
+    const paper = cachedData.papers.find(p => p.id === paperId);
+    if (!paper) return;
+    showConfirmModal({
+        title: '归档试卷',
+        message: `确定要归档试卷 "${paper.name}" 吗？\n归档后学生端将无法查看，且试卷不可被推送。`,
+        confirmText: '确定归档',
+        confirmType: 'warning',
+        onConfirm: async () => {
+            await Storage.updatePaper({ ...paper, archived: 1 });
+            showAlert('归档成功');
+            await refreshCache();
+            loadPapers();
+        }
+    });
+}
+
+async function unarchivePaper(paperId) {
+    const paper = cachedData.papers.find(p => p.id === paperId);
+    if (!paper) return;
+    await Storage.updatePaper({ ...paper, archived: 0 });
+    showAlert('已取消归档');
+    await refreshCache();
+    loadPapers();
+    if (archiveModalOpen) showArchiveManagement();
+}
+
+function showArchiveManagement() {
+    archiveModalOpen = true;
+    const currentUser = Storage.getCurrentUser();
+    const archivedPapers = cachedData.papers.filter(p => {
+        if (!p.archived) return false;
+        if (currentUser.role === 'super_admin') return true;
+        const isCreator = p.creatorId === currentUser.id;
+        const inManagerGroup = p.groupId && hasCommonGroup(p.groupId, currentUser.groupId);
+        return isCreator || inManagerGroup;
+    });
+
+    const bodyHtml = archivedPapers.length
+        ? `<table class="data-table"><thead><tr>
+              <th style="text-align:center;">试卷名称</th>
+              <th style="text-align:center;width:180px;">创建日期</th>
+              <th style="text-align:center;width:200px;">操作</th>
+          </tr></thead>
+          <tbody>${archivedPapers.map(p => `<tr>
+              <td style="text-align:center;">${escapeHtml(p.name)}</td>
+              <td style="text-align:center;white-space:nowrap;">${formatFullDateTime(p.createDate)}</td>
+              <td style="text-align:center;">
+                  <div style="display:inline-flex;gap:8px;">
+                      <button class="btn btn-sm btn-primary" data-id="${p.id}"
+                          onclick="safeOnclick(this,'unarchivePaper',['id'])">取消归档</button>
+                      <button class="btn btn-sm btn-danger" data-id="${p.id}"
+                          onclick="safeOnclick(this,'deletePaper',['id'])">删除</button>
+                  </div>
+              </td>
+          </tr>`).join('')}
+          </tbody></table>`
+        : '<p class="text-muted" style="text-align:center;padding:20px;">暂无已归档试卷</p>';
+
+    openModal(
+        '归档试卷管理',
+        bodyHtml,
+        `<button class="btn btn-secondary" onclick="closeModal()">关闭</button>`,
+        () => { archiveModalOpen = false; }
+    );
+}
 
 // 替换 clearExamRecords
 async function clearExamRecords(paperId) {
