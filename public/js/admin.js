@@ -3077,7 +3077,7 @@ function filterSelectorItems(containerId, query) {
 
 // ========== 管理员排行榜 ==========
 function loadAdminRankingOptions() {
-    const papers = cachedData.papers;
+    const papers = cachedData.papers.filter(p => !p.archived);
     document.getElementById('admin-ranking-select').innerHTML = '<option value="">请选择试卷</option>' +
         papers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
 }
